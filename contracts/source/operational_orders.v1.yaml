@@ -1,0 +1,189 @@
+contract_version: 1.0.0
+status: accepted
+accepted_by: Juan Pablo
+accepted_date: 2026-09-06
+related_sdd: SDD.md
+dataset:
+  name: operational_orders
+  owner: Juan Pablo
+  producer: deterministic_source_simulator
+  source_type: postgresql_table
+  relation: source.orders
+  grain: One row represents the latest operational state of one order.
+  primary_key:
+    - order_id
+  currency_applicability: not_applicable_no_monetary_fields
+incremental_interface:
+  cursor:
+    - source_updated_at
+    - order_id
+  ordering: lexicographic
+  lower_boundary: exclusive
+  upper_boundary: inclusive
+  upper_boundary_source: Greatest cursor tuple in the stable source snapshot at run start.
+  initial_boundary: No lower predicate when no checkpoint exists.
+  null_cursor_behavior: Fail the entity before extraction.
+  phase_1_concurrency: Simulator writes and extraction are serialized.
+  overlap_window: disabled
+  hard_delete_capture: unsupported
+schema:
+  - name: order_id
+    postgresql_type: text
+    logical_type: string
+    required: true
+    pattern: "^[0-9a-f]{32}$"
+  - name: customer_id
+    postgresql_type: text
+    logical_type: string
+    required: true
+    pattern: "^[0-9a-f]{32}$"
+  - name: order_status
+    postgresql_type: text
+    logical_type: string
+    required: true
+    allowed_values:
+      - created
+      - approved
+      - processing
+      - invoiced
+      - shipped
+      - delivered
+      - unavailable
+      - canceled
+  - name: order_purchase_at
+    postgresql_type: timestamptz
+    logical_type: utc_instant
+    required: true
+  - name: order_purchase_at_source_text
+    postgresql_type: text
+    logical_type: string
+    required: true
+  - name: order_purchase_at_timezone_resolution
+    postgresql_type: text
+    logical_type: string
+    required: true
+    allowed_values: [exact, ambiguous_fold_0, synthetic_aware]
+  - name: order_approved_at
+    postgresql_type: timestamptz
+    logical_type: utc_instant
+    required: false
+  - name: order_approved_at_source_text
+    postgresql_type: text
+    logical_type: string
+    required: false
+  - name: order_approved_at_timezone_resolution
+    postgresql_type: text
+    logical_type: string
+    required: false
+    allowed_values: [exact, ambiguous_fold_0, synthetic_aware]
+  - name: order_delivered_carrier_at
+    postgresql_type: timestamptz
+    logical_type: utc_instant
+    required: false
+  - name: order_delivered_carrier_at_source_text
+    postgresql_type: text
+    logical_type: string
+    required: false
+  - name: order_delivered_carrier_at_timezone_resolution
+    postgresql_type: text
+    logical_type: string
+    required: false
+    allowed_values: [exact, ambiguous_fold_0, synthetic_aware]
+  - name: order_delivered_customer_at
+    postgresql_type: timestamptz
+    logical_type: utc_instant
+    required: false
+  - name: order_delivered_customer_at_source_text
+    postgresql_type: text
+    logical_type: string
+    required: false
+  - name: order_delivered_customer_at_timezone_resolution
+    postgresql_type: text
+    logical_type: string
+    required: false
+    allowed_values: [exact, ambiguous_fold_0, synthetic_aware]
+  - name: order_estimated_delivery_at
+    postgresql_type: timestamptz
+    logical_type: utc_instant
+    required: true
+  - name: order_estimated_delivery_at_source_text
+    postgresql_type: text
+    logical_type: string
+    required: true
+  - name: order_estimated_delivery_at_timezone_resolution
+    postgresql_type: text
+    logical_type: string
+    required: true
+    allowed_values: [exact, ambiguous_fold_0, synthetic_aware]
+  - name: source_created_at
+    postgresql_type: timestamptz
+    logical_type: utc_instant
+    required: true
+    source: simulator_owned
+  - name: source_updated_at
+    postgresql_type: timestamptz
+    logical_type: utc_instant
+    required: true
+    source: simulator_owned
+conditional_rules:
+  - id: OP-ORD-PROV-001
+    severity: quarantine
+    rule: A non-null business timestamp has non-null source text and timezone resolution.
+  - id: OP-ORD-PROV-002
+    severity: quarantine
+    rule: A null nullable business timestamp has null source text and timezone resolution.
+  - id: OP-ORD-CURSOR-001
+    severity: blocking
+    rule: source_updated_at and order_id are never null.
+  - id: OP-ORD-CURSOR-002
+    severity: blocking
+    rule: Every mutation of an existing order sets source_updated_at strictly later than its previous value.
+  - id: OP-ORD-VERSION-001
+    severity: blocking
+    rule: One order_id and source_updated_at tuple cannot have conflicting payload hashes.
+  - id: OP-ORD-STATUS-001
+    severity: quarantine
+    rule: order_status belongs to the accepted domain.
+  - id: OP-ORD-QUALITY-001
+    severity: warning
+    rule: A delivered order should have a valid customer-delivery instant.
+  - id: OP-ORD-QUALITY-002
+    severity: warning
+    rule: Customer delivery should not precede purchase.
+  - id: OP-ORD-QUALITY-003
+    severity: warning
+    rule: Customer delivery should not precede carrier handoff when both are present.
+  - id: OP-ORD-QUALITY-004
+    severity: warning
+    rule: Carrier handoff should not precede approval when both are present.
+rejection_policy:
+  evaluated_count: accepted_count + rejected_count
+  maximum_rejected_rows: 10
+  maximum_rejected_rate: 0.01
+  on_threshold_exceeded: Fail extraction, preserve rejected rows, and do not advance the checkpoint.
+freshness:
+  cadence: daily_capable_and_manually_triggerable
+  healthy_run_target_minutes: 15
+classification:
+  pii: pseudonymous
+  pii_fields:
+    - customer_id
+  secrets: false
+retention:
+  operational_state: Current state for the local project lifetime.
+  committed_bronze: Immutable for the local project lifetime.
+  quarantine: Immutable for the local project lifetime unless an explicit cleanup policy is accepted.
+compatibility:
+  policy: backward
+  breaking_changes:
+    - change cursor semantics
+    - change order_id semantics
+    - remove or rename a consumed column
+    - narrow a consumed type
+    - change source timestamp meaning
+consumers:
+  - incremental_orders_ingestion
+known_limitations:
+  - Hard deletes are not captured.
+  - Concurrent simulator writes and extraction are unsupported in Phase 1.
+  - Business timestamps inherited from Olist rely on a documented timezone assumption.

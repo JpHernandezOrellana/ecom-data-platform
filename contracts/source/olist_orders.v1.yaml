@@ -1,0 +1,156 @@
+contract_version: 1.0.0
+status: accepted
+accepted_by: Juan Pablo
+accepted_date: 2026-09-06
+related_sdd: SDD.md
+dataset:
+  name: olist_orders_bootstrap
+  owner: Juan Pablo
+  producer: Olist
+  source_type: csv
+  source_file: dataset/olist_orders_dataset.csv
+  manifest: data/manifest.json
+  source_url: https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce
+  license: CC BY-NC-SA 4.0
+  grain: One row represents one historical Olist order current/final state.
+  primary_key:
+    - order_id
+  currency_applicability: not_applicable_no_monetary_fields
+format:
+  encoding: utf-8
+  delimiter: ","
+  quote_character: '"'
+  header_required: true
+  timestamp_format: "%Y-%m-%d %H:%M:%S"
+  timestamp_source_timezone: America/Sao_Paulo
+  timestamps_are_timezone_naive: true
+schema:
+  - name: order_id
+    source_position: 1
+    logical_type: string
+    required: true
+    pattern: "^[0-9a-f]{32}$"
+    semantics: Stable Olist order identifier.
+  - name: customer_id
+    source_position: 2
+    logical_type: string
+    required: true
+    pattern: "^[0-9a-f]{32}$"
+    semantics: Identifier of the order-associated customer row, not the repeat-customer identity.
+  - name: order_status
+    source_position: 3
+    logical_type: string
+    required: true
+    allowed_values:
+      - created
+      - approved
+      - processing
+      - invoiced
+      - shipped
+      - delivered
+      - unavailable
+      - canceled
+  - name: order_purchase_timestamp
+    source_position: 4
+    logical_type: naive_datetime
+    required: true
+  - name: order_approved_at
+    source_position: 5
+    logical_type: naive_datetime
+    required: false
+  - name: order_delivered_carrier_date
+    source_position: 6
+    logical_type: naive_datetime
+    required: false
+  - name: order_delivered_customer_date
+    source_position: 7
+    logical_type: naive_datetime
+    required: false
+  - name: order_estimated_delivery_date
+    source_position: 8
+    logical_type: naive_datetime
+    required: true
+timezone_resolution:
+  ambiguous_local_time:
+    action: accept_with_flag
+    fold: 0
+    resolution_code: ambiguous_fold_0
+  nonexistent_local_time:
+    action: quarantine_row
+  exact_local_time:
+    resolution_code: exact
+bootstrap_mapping:
+  order_purchase_timestamp: order_purchase_at
+  order_approved_at: order_approved_at
+  order_delivered_carrier_date: order_delivered_carrier_at
+  order_delivered_customer_date: order_delivered_customer_at
+  order_estimated_delivery_date: order_estimated_delivery_at
+  generated_fields:
+    source_created_at: configured bootstrap_loaded_at in UTC
+    source_updated_at: configured bootstrap_loaded_at in UTC
+quality_rules:
+  - id: OLIST-ORD-STRUCT-001
+    severity: blocking
+    rule: The header contains exactly the eight contracted columns in contracted order.
+  - id: OLIST-ORD-KEY-001
+    severity: quarantine
+    rule: order_id is non-null and matches the required pattern.
+  - id: OLIST-ORD-KEY-002
+    severity: blocking
+    rule: Accepted order_id values are unique within the bootstrap input.
+  - id: OLIST-ORD-STATUS-001
+    severity: quarantine
+    rule: order_status belongs to the accepted domain.
+  - id: OLIST-ORD-TIME-001
+    severity: quarantine
+    rule: Every present timestamp parses and can be localized according to timezone_resolution; required timestamps must also be non-null.
+  - id: OLIST-ORD-TIME-002
+    severity: warning
+    rule: A delivered order should have a customer-delivery timestamp.
+  - id: OLIST-ORD-TIME-003
+    severity: warning
+    rule: Customer delivery should not precede carrier handoff.
+  - id: OLIST-ORD-TIME-004
+    severity: warning
+    rule: Carrier handoff should not precede approval.
+  - id: OLIST-ORD-TIME-005
+    severity: warning
+    rule: Customer delivery should not precede purchase.
+rejection_policy:
+  evaluated_count: accepted_count + rejected_count
+  maximum_rejected_rows: 10
+  maximum_rejected_rate: 0.01
+  on_threshold_exceeded: Fail bootstrap after durably preserving rejected rows.
+observed_profile:
+  source_file_sha256: 8df58ef3d2d7e9944010f7beecd9b75367f5588ec6e3c91cec19ae3345ef9ecf
+  logical_rows: 99441
+  unique_order_ids: 99441
+  delivered_without_customer_delivery_timestamp: 8
+  delivered_without_approval_timestamp: 14
+  customer_delivery_before_carrier_handoff: 23
+  carrier_handoff_before_approval: 1359
+  delivered_after_estimated_date: 7827
+classification:
+  pii: pseudonymous
+  pii_fields:
+    - customer_id
+  secrets: false
+freshness:
+  expectation: not_applicable_historical_snapshot
+retention:
+  source_file: Local input retained by the operator under the source license.
+  bootstrap_quarantine: Retain for the local project unless explicitly cleaned after evidence export.
+compatibility:
+  policy: exact_versioned_bootstrap_schema
+  breaking_changes:
+    - remove or rename a contracted column
+    - change a contracted logical type
+    - change order_id semantics
+    - add a new required column
+    - add any uncontracted source column to this hash-pinned bootstrap version
+consumers:
+  - deterministic_orders_bootstrap
+known_limitations:
+  - Source timestamps do not identify a timezone or UTC offset.
+  - The dataset contains current/final order states, not complete transition history.
+  - The project timezone interpretation is an explicit assumption.

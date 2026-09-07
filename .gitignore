@@ -1,0 +1,31 @@
+# Local source data. Keep only reproducibility metadata in Git.
+/dataset/*.csv
+
+# Runtime data products.
+/data/committed_batches/
+/data/quarantine/
+
+# Secrets and local configuration.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Python and tooling caches.
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+
+# dbt generated artifacts.
+target/
+dbt_packages/
+logs/
+
+# Local editor and operating-system files.
+.DS_Store
+.idea/
+.vscode/

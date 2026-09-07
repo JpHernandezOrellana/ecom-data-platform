@@ -1,0 +1,129 @@
+contract_version: 1.0.0
+metric_version: 1.0.0
+status: accepted
+accepted_by: Juan Pablo
+accepted_date: 2026-09-06
+related_sdd: SDD.md
+data_product:
+  name: mart_daily_order_fulfillment
+  owner: Juan Pablo
+  producer: phase_1_dbt_project
+  relation: gold.mart_daily_order_fulfillment
+  grain: One row represents one order purchase-date cohort in America/Santiago.
+  purpose: Certified daily fulfillment outcomes for orders grouped by Chilean purchase date.
+  primary_key:
+    - reporting_date
+  currency_applicability: not_applicable_no_monetary_fields
+schema:
+  - name: reporting_date
+    postgresql_type: date
+    logical_type: date
+    required: true
+    semantics: Purchase instant converted from assumed America/Sao_Paulo source time through UTC to America/Santiago, then truncated to local date.
+  - name: order_count
+    postgresql_type: bigint
+    logical_type: integer
+    required: true
+    minimum: 0
+  - name: delivered_order_count
+    postgresql_type: bigint
+    logical_type: integer
+    required: true
+    minimum: 0
+  - name: canceled_order_count
+    postgresql_type: bigint
+    logical_type: integer
+    required: true
+    minimum: 0
+  - name: late_delivered_order_count
+    postgresql_type: bigint
+    logical_type: integer
+    required: true
+    minimum: 0
+  - name: late_delivery_eligible_order_count
+    postgresql_type: bigint
+    logical_type: integer
+    required: true
+    minimum: 0
+  - name: late_delivery_rate
+    postgresql_type: numeric(18,6)
+    logical_type: decimal
+    required: false
+    minimum: 0
+    maximum: 1
+  - name: average_delivery_duration_days
+    postgresql_type: numeric(18,6)
+    logical_type: decimal
+    required: false
+    minimum: 0
+  - name: orders_with_fulfillment_quality_issue
+    postgresql_type: bigint
+    logical_type: integer
+    required: true
+    minimum: 0
+metrics:
+  canonical_glossary: docs/metrics.md
+  included:
+    - order_count
+    - delivered_order_count
+    - canceled_order_count
+    - late_delivered_order_count
+    - late_delivery_eligible_order_count
+    - late_delivery_rate
+    - average_delivery_duration_days
+    - orders_with_fulfillment_quality_issue
+quality_rules:
+  - id: GOLD-ORD-GRAIN-001
+    severity: blocking
+    rule: reporting_date is unique and non-null.
+  - id: GOLD-ORD-COUNT-001
+    severity: blocking
+    rule: All count fields are non-negative integers.
+  - id: GOLD-ORD-COUNT-002
+    severity: blocking
+    rule: delivered_order_count, canceled_order_count, and orders_with_fulfillment_quality_issue do not exceed order_count.
+  - id: GOLD-ORD-LATE-001
+    severity: blocking
+    rule: late_delivered_order_count does not exceed late_delivery_eligible_order_count.
+  - id: GOLD-ORD-LATE-002
+    severity: blocking
+    rule: late_delivery_rate is null exactly when late_delivery_eligible_order_count is zero; otherwise it equals late_delivered_order_count divided by the eligible count.
+  - id: GOLD-ORD-DURATION-001
+    severity: blocking
+    rule: average_delivery_duration_days is null when no valid delivered order exists and is otherwise non-negative.
+  - id: GOLD-ORD-RECON-001
+    severity: blocking
+    rule: order_count reconciles to eligible Silver orders by reporting_date.
+freshness:
+  cadence: daily_capable_and_manually_triggerable
+  healthy_run_target_minutes: 15
+publication:
+  candidate_schema: gold_candidate
+  candidate_relation_pattern: mart_daily_order_fulfillment__<publication_id>
+  certified_relation: gold.mart_daily_order_fulfillment
+  certified_relation_type: view
+  promotion: Replace the stable view and record publication metadata in one warehouse transaction after all required tests pass.
+  failed_candidate_behavior: Preserve the previously certified view target.
+  retention:
+    successful_candidates: 5
+    failed_candidate_days: 7
+classification:
+  pii: none
+  secrets: false
+retention:
+  certified_product: Retain the current certified view and its referenced candidate.
+compatibility:
+  policy: backward
+  breaking_changes:
+    - change grain or reporting date role
+    - change a metric formula or eligibility rule
+    - remove or rename a contracted field
+    - change timezone semantics
+consumers:
+  - analyst
+  - portfolio_reviewer
+known_limitations:
+  - Results are purchase-date cohorts, not delivery-date activity.
+  - Historical Olist timestamps use an assumed source timezone.
+  - Outcomes can restate when an old order receives a later simulated update.
+  - Phase 1 contains no monetary metrics.

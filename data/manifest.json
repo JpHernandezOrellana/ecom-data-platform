@@ -1,0 +1,160 @@
+{
+  "manifest_version": "1.0.0",
+  "dataset": {
+    "name": "Brazilian E-Commerce Public Dataset by Olist",
+    "kaggle_identifier": "olistbr/brazilian-ecommerce",
+    "canonical_url": "https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce",
+    "license": "CC BY-NC-SA 4.0",
+    "license_source": "Kaggle dataset metadata",
+    "retrieved_at": null,
+    "retrieval_date_status": "Unavailable; the local files predate creation of this manifest.",
+    "verified_at": "2026-09-06",
+    "local_directory": "dataset",
+    "redistribution_policy": "Raw CSV files are local inputs and are not committed by default. Users must obtain the dataset under its source license."
+  },
+  "verification": {
+    "hash_algorithm": "sha256",
+    "row_count_definition": "Logical CSV data records excluding the header",
+    "row_count_method": "RFC-compatible CSV parsing with UTF-8-SIG decoding",
+    "total_files": 9,
+    "total_bytes": 126186995,
+    "total_logical_rows": 1550922
+  },
+  "files": [
+    {
+      "path": "dataset/olist_customers_dataset.csv",
+      "bytes": 9033957,
+      "logical_rows": 99441,
+      "sha256": "983a422239e1712ded753b3bf9ecf47dc73f144d306029dcfa99e70a226883d2",
+      "columns": [
+        "customer_id",
+        "customer_unique_id",
+        "customer_zip_code_prefix",
+        "customer_city",
+        "customer_state"
+      ]
+    },
+    {
+      "path": "dataset/olist_geolocation_dataset.csv",
+      "bytes": 61273883,
+      "logical_rows": 1000163,
+      "sha256": "b514f6fc991b9566aeba02aa5d67e2c3630f034b60a0e05aa0d082a3b66d88d6",
+      "columns": [
+        "geolocation_zip_code_prefix",
+        "geolocation_lat",
+        "geolocation_lng",
+        "geolocation_city",
+        "geolocation_state"
+      ]
+    },
+    {
+      "path": "dataset/olist_order_items_dataset.csv",
+      "bytes": 15438671,
+      "logical_rows": 112650,
+      "sha256": "0bc4d068c4fe38cbb01bd90e8746e3c613fe7b4baef75fab7b0e329701c3e279",
+      "columns": [
+        "order_id",
+        "order_item_id",
+        "product_id",
+        "seller_id",
+        "shipping_limit_date",
+        "price",
+        "freight_value"
+      ]
+    },
+    {
+      "path": "dataset/olist_order_payments_dataset.csv",
+      "bytes": 5777138,
+      "logical_rows": 103886,
+      "sha256": "4f713964f2815dbbaa40b9488268c55aac3627bfce5aa96cf58d1f3616de3cc0",
+      "columns": [
+        "order_id",
+        "payment_sequential",
+        "payment_type",
+        "payment_installments",
+        "payment_value"
+      ]
+    },
+    {
+      "path": "dataset/olist_order_reviews_dataset.csv",
+      "bytes": 14451670,
+      "logical_rows": 99224,
+      "sha256": "012b61c7593e34f51fa614efdf802b9c7056ce6aae5307ddb93236e7cfc797d7",
+      "format_notes": [
+        "Quoted fields contain embedded newlines",
+        "Physical line counts are not record counts"
+      ],
+      "columns": [
+        "review_id",
+        "order_id",
+        "review_score",
+        "review_comment_title",
+        "review_comment_message",
+        "review_creation_date",
+        "review_answer_timestamp"
+      ]
+    },
+    {
+      "path": "dataset/olist_orders_dataset.csv",
+      "bytes": 17654914,
+      "logical_rows": 99441,
+      "sha256": "8df58ef3d2d7e9944010f7beecd9b75367f5588ec6e3c91cec19ae3345ef9ecf",
+      "phase": "Phase 1",
+      "columns": [
+        "order_id",
+        "customer_id",
+        "order_status",
+        "order_purchase_timestamp",
+        "order_approved_at",
+        "order_delivered_carrier_date",
+        "order_delivered_customer_date",
+        "order_estimated_delivery_date"
+      ]
+    },
+    {
+      "path": "dataset/olist_products_dataset.csv",
+      "bytes": 2379446,
+      "logical_rows": 32951,
+      "sha256": "3e6569628a17fbc75fd206ee357b59e20364b9afa90f5b6cd5b4d624c58aa9cc",
+      "format_notes": [
+        "Source headers intentionally contain the spelling lenght"
+      ],
+      "columns": [
+        "product_id",
+        "product_category_name",
+        "product_name_lenght",
+        "product_description_lenght",
+        "product_photos_qty",
+        "product_weight_g",
+        "product_length_cm",
+        "product_height_cm",
+        "product_width_cm"
+      ]
+    },
+    {
+      "path": "dataset/olist_sellers_dataset.csv",
+      "bytes": 174703,
+      "logical_rows": 3095,
+      "sha256": "1f643d2b950373b85735e7794b20986f528d7a000432e7c6f9bcbb44d0846a0e",
+      "columns": [
+        "seller_id",
+        "seller_zip_code_prefix",
+        "seller_city",
+        "seller_state"
+      ]
+    },
+    {
+      "path": "dataset/product_category_name_translation.csv",
+      "bytes": 2613,
+      "logical_rows": 71,
+      "sha256": "a81f0d1f27b27e7293f761bc79e3ce8f348ee39c4b3ed3e49bde38f478586278",
+      "format_notes": [
+        "File begins with a UTF-8 byte-order mark"
+      ],
+      "columns": [
+        "product_category_name",
+        "product_category_name_english"
+      ]
+    }
+  ]
+}
