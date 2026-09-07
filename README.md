@@ -4,9 +4,9 @@ A portfolio Data Engineering project designed to demonstrate reliable incrementa
 
 ## Current status
 
-**Phase:** Phase 1 implemented (orders fulfillment vertical slice)  
+**Phase:** Phase 1 closed (orders fulfillment vertical slice)
 **Design status:** Accepted on 2026-09-06  
-**Implementation status:** Working local pipeline; final polish pending  
+**Implementation status:** Accepted locally on 2026-09-07
 **Implementation authorization:** Phase 1 authorized  
 
 Phase 1 delivers: Docker Compose with source + warehouse PostgreSQL, deterministic Olist
@@ -17,6 +17,9 @@ and `gold.mart_daily_order_fulfillment` (one row per Chilean purchase-date cohor
 
 Verified reconciliation: source 99,442 = silver 99,442 = gold 99,442
 (99,441 Olist + 1 deterministic demo mutation).
+
+Closure evidence, reference environment, timing, final reconciliation, and verification
+commands are recorded in [`docs/evidence/phase1-closure.md`](docs/evidence/phase1-closure.md).
 
 ## Business problem
 
@@ -95,6 +98,8 @@ Phase 1 contains no monetary metrics.
 | [`ADR-004`](docs/adrs/ADR-004-fulfillment-mart.md) | Gold grain, metrics, and publication | Accepted |
 | [`Metric glossary`](docs/metrics.md) | Canonical Phase 1 metric semantics | Accepted |
 | [`Test matrix`](docs/testing/phase1-test-matrix.md) | Required Phase 1 verification | Accepted |
+| [`Phase 1 closure evidence`](docs/evidence/phase1-closure.md) | Acceptance results and layer reconciliation | Closed |
+| [`Progress report`](docs/evidence/progress-report.md) | Current phase, verification, and next-phase gates | Current |
 | [`Olist bootstrap contract`](contracts/source/olist_orders.v1.yaml) | Historical CSV boundary | Accepted |
 | [`Operational orders contract`](contracts/source/operational_orders.v1.yaml) | Incremental PostgreSQL boundary | Accepted |
 | [`Gold contract`](contracts/gold/mart_daily_order_fulfillment.v1.yaml) | Certified consumer product | Accepted |
@@ -135,6 +140,7 @@ uv sync --extra dev
 docker compose up -d
 set -a; source .env; set +a
 uv run python -m ecom.bootstrap --csv dataset/olist_orders_dataset.csv --attempt-id boot-001
+scripts/create_source_reader.sh
 uv run python -m ecom.extract
 uv run python -m ecom.load
 uv run python -m ecom.mutate --ts 2018-10-21T00:00:00+00:00
@@ -154,5 +160,5 @@ and source = silver = gold reconciliation.
 ## Next steps
 
 - Add CI workflow running lint + unit tests + dbt build on an ephemeral stack.
-- Harden operational extras: reader-role creation script, backfill CLI, candidate retention job.
+- Harden operational extras: backfill CLI and candidate retention job.
 - Then expand to Phase 2 entities (order items + FX-gated CLP reporting).

@@ -7,6 +7,7 @@ import re
 import shutil
 import uuid
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -28,10 +29,36 @@ def _fmt_cursor(ts: datetime | None, key: str | None) -> str:
     return f"{ts.isoformat()}|{key}"
 
 
+def _sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as hdl:
+        for chunk in iter(lambda: hdl.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _verify_manifest_files(base: Path, manifest: dict) -> None:
+    """Fail closed when committed files do not match the manifest (COMMIT-005)."""
+    files = manifest.get("files", {})
+    bronze = files.get("bronze/accepted.parquet")
+    if not bronze:
+        raise SystemExit("manifest checksum mismatch: missing bronze hash")
+    for rel, expected in files.items():
+        p = base / rel
+        if not p.is_file():
+            raise SystemExit(f"manifest checksum mismatch: missing file {rel}")
+        if _sha256_file(p) != expected:
+            raise SystemExit(f"manifest checksum mismatch: altered file {rel}")
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description="Bounded incremental orders extraction")
     p.add_argument("--run-mode", default="incremental", choices=["incremental", "backfill"])
     p.add_argument("--backfill-request-id", default="")
+    p.add_argument("--backfill-from-ts", default="")
+    p.add_argument("--backfill-from-key", default="")
+    p.add_argument("--backfill-to-ts", default="")
+    p.add_argument("--backfill-to-key", default="")
     p.add_argument(
         "--fail-after-publish",
         action="store_true",
@@ -56,7 +83,15 @@ def main() -> None:
         print(f"recovered committed batch {recovered} without re-extraction")
         return
 
-    with connect(settings.source_dsn) as sconn:
+    is_backfill = args.run_mode == "backfill"
+    if is_backfill and not args.backfill_request_id:
+        raise SystemExit("backfill mode requires --backfill-request-id")
+    if bool(args.backfill_from_ts) != bool(args.backfill_from_key):
+        raise SystemExit("backfill --backfill-from-ts and --backfill-from-key go together")
+    if bool(args.backfill_to_ts) != bool(args.backfill_to_key):
+        raise SystemExit("backfill --backfill-to-ts and --backfill-to-key go together")
+
+    with connect(settings.source_dsn, retries=3) as sconn:
         sconn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
         with sconn.cursor() as cur:
             cur.execute(
@@ -65,20 +100,30 @@ def main() -> None:
             (nulls,) = cur.fetchone()  # type: ignore
             if nulls:
                 raise SystemExit(f"extraction blocking failure: {nulls} null cursor components")
-            cur.execute(
-                "SELECT source_updated_at, order_id FROM source.orders ORDER BY source_updated_at DESC, order_id DESC LIMIT 1"
-            )
-            top = cur.fetchone()
-            if top is None:
-                print("no_op: source empty")
-                return
-            upper_ts, upper_key = top
+            if is_backfill and args.backfill_to_ts:
+                upper_ts = datetime.fromisoformat(args.backfill_to_ts)
+                upper_key = args.backfill_to_key
+            else:
+                cur.execute(
+                    "SELECT source_updated_at, order_id FROM source.orders ORDER BY source_updated_at DESC, order_id DESC LIMIT 1"
+                )
+                top = cur.fetchone()
+                if top is None:
+                    print("no_op: source empty")
+                    return
+                upper_ts, upper_key = top
+            if is_backfill and args.backfill_from_ts:
+                lower_ts = datetime.fromisoformat(args.backfill_from_ts)
+                lower_key = args.backfill_from_key
+                has_lower = True
+            else:
+                lower_ts, lower_key = before_ts, before_key
+                has_lower = before_ts is not None
             params = {"upper_ts": upper_ts, "upper_key": upper_key}
-            has_lower = before_ts is not None
             if has_lower:
-                params.update({"before_ts": before_ts, "before_key": before_key})
+                params.update({"before_ts": lower_ts, "before_key": lower_key})
             # empty-window check
-            if has_lower and (upper_ts, upper_key) <= (before_ts, before_key):  # type: ignore
+            if has_lower and (upper_ts, upper_key) <= (lower_ts, lower_key):  # type: ignore
                 print("no_op: empty window")
                 return
             sql = (
@@ -129,7 +174,7 @@ def main() -> None:
 
     evaluated = len(accepted) + len(rejected)
     rate = (len(rejected) / evaluated) if evaluated else 0.0
-    cursor_before_s = _fmt_cursor(before_ts, before_key)
+    cursor_before_s = _fmt_cursor(lower_ts, lower_key)
     cursor_upper_s = _fmt_cursor(upper_ts, upper_key)
     batch_id = compute_batch_id(
         source=SOURCE_NAME,
@@ -184,26 +229,44 @@ def main() -> None:
         "rejected_count": len(rejected),
         "contract_version": "1.0.0",
     }
+    files: dict[str, str] = {
+        "bronze/accepted.parquet": _sha256_file(tmp / "bronze" / "accepted.parquet")
+    }
+    if rejected:
+        files["quarantine/rejected.parquet"] = _sha256_file(tmp / "quarantine" / "rejected.parquet")
+    manifest["files"] = files
     (tmp / "manifest.json").write_text(json.dumps(manifest, indent=2))
     committed.parent.mkdir(parents=True, exist_ok=True)
     if committed.exists():
+        # Same deterministic batch was already committed (retry/backfill repeat):
+        # the on-disk evidence is canonical; verify it instead of the new tmp copy
+        # (Parquet bytes are not stable across runs) and drop the duplicate.
+        disk_manifest = json.loads((committed / "manifest.json").read_text())
+        _verify_manifest_files(committed, disk_manifest)
         shutil.rmtree(tmp)
+        manifest = disk_manifest
+        run_id = manifest["run_id"]
     else:
         tmp.rename(committed)
 
     if args.fail_after_publish:
         raise SystemExit("injected crash after filesystem publication, before checkpoint commit")
 
-    _commit_checkpoint(
-        settings,
-        manifest,
-        str(committed / "manifest.json"),
-        run_id,
-        before_ts,
-        before_key,
-        upper_ts,
-        upper_key,
-    )
+    if is_backfill:
+        # Backfill batches are registered for loading but never move the normal
+        # checkpoint (COMMIT-008). Canonical state converges via idempotent load.
+        _register_batch(settings, manifest, str(committed / "manifest.json"), run_id)
+    else:
+        _commit_checkpoint(
+            settings,
+            manifest,
+            str(committed / "manifest.json"),
+            run_id,
+            before_ts,
+            before_key,
+            upper_ts,
+            upper_key,
+        )
     print(f"extraction ok: batch={batch_id} accepted={len(accepted)} rejected={len(rejected)}")
 
 
@@ -231,6 +294,7 @@ def _try_recover(settings: Settings, before_ts, before_key) -> str | None:
                 continue
         upper_ts = datetime.fromisoformat(m["cursor_upper"].split("|")[0])
         upper_key = m["cursor_upper"].split("|")[1]
+        _verify_manifest_files(manifest_path.parent, m)
         _commit_checkpoint(
             settings, m, str(manifest_path), m["run_id"], before_ts, before_key, upper_ts, upper_key
         )
@@ -238,9 +302,55 @@ def _try_recover(settings: Settings, before_ts, before_key) -> str | None:
     return None
 
 
+def _insert_batch(cur, manifest: dict, manifest_path: str, run_id: str) -> None:
+    cur.execute(
+        """INSERT INTO control.batch (batch_id, source_name, entity_name, run_id, run_mode,
+           cursor_before_updated_at, cursor_before_key, cursor_upper_updated_at, cursor_upper_key,
+           contract_version, manifest_path, accepted_count, rejected_count, status)
+           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'committed')
+           ON CONFLICT (batch_id) DO NOTHING""",
+        (
+            manifest["batch_id"],
+            SOURCE_NAME,
+            ENTITY,
+            run_id,
+            manifest.get("run_mode", "incremental"),
+            _parse_cursor_ts(manifest["cursor_before"]),
+            _parse_cursor_key(manifest["cursor_before"]),
+            _parse_cursor_ts(manifest["cursor_upper"]),
+            _parse_cursor_key(manifest["cursor_upper"]),
+            "1.0.0",
+            manifest_path,
+            manifest["accepted_count"],
+            manifest["rejected_count"],
+        ),
+    )
+
+
+def _parse_cursor_ts(cursor_s: str):
+    if cursor_s == "NONE":
+        return None
+    return datetime.fromisoformat(cursor_s.split("|")[0])
+
+
+def _parse_cursor_key(cursor_s: str):
+    if cursor_s == "NONE":
+        return None
+    return cursor_s.split("|")[1]
+
+
+def _register_batch(settings: Settings, manifest: dict, manifest_path: str, run_id: str) -> None:
+    """Register a backfill batch without touching the normal checkpoint."""
+    _verify_manifest_files(Path(manifest_path).parent, manifest)
+    with connect(settings.warehouse_dsn) as wconn, wconn.cursor() as cur:
+        _insert_batch(cur, manifest, manifest_path, run_id)
+        wconn.commit()
+
+
 def _commit_checkpoint(
     settings, manifest, manifest_path, run_id, before_ts, before_key, upper_ts, upper_key
 ) -> None:
+    _verify_manifest_files(Path(manifest_path).parent, manifest)
     with connect(settings.warehouse_dsn) as wconn, wconn.cursor() as cur:
         cur.execute(
             "SELECT cursor_updated_at, cursor_key FROM control.checkpoint WHERE source_name=%s AND entity_name=%s",
@@ -251,28 +361,7 @@ def _commit_checkpoint(
         if (cur_ts, cur_key) != (before_ts, before_key):
             wconn.rollback()
             raise SystemExit("checkpoint compare-and-swap conflict: concurrent committer")
-        cur.execute(
-            """INSERT INTO control.batch (batch_id, source_name, entity_name, run_id, run_mode,
-               cursor_before_updated_at, cursor_before_key, cursor_upper_updated_at, cursor_upper_key,
-               contract_version, manifest_path, accepted_count, rejected_count, status)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'committed')
-               ON CONFLICT (batch_id) DO NOTHING""",
-            (
-                manifest["batch_id"],
-                SOURCE_NAME,
-                ENTITY,
-                run_id,
-                manifest.get("run_mode", "incremental"),
-                before_ts,
-                before_key,
-                upper_ts,
-                upper_key,
-                "1.0.0",
-                manifest_path,
-                manifest["accepted_count"],
-                manifest["rejected_count"],
-            ),
-        )
+        _insert_batch(cur, manifest, manifest_path, run_id)
         cur.execute(
             """INSERT INTO control.checkpoint (source_name, entity_name, cursor_updated_at, cursor_key,
                last_committed_batch_id, last_ingestion_run_id, committed_at, checkpoint_version)

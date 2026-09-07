@@ -42,6 +42,63 @@ def test_structural_header_failure():
     assert "unexpected header" in (r.stdout + r.stderr)
 
 
+def _good(i: int) -> str:
+    return (
+        f"{i:032x},bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb,created,"
+        "2018-01-02 10:00:00,,,,2018-01-10 00:00:00"
+    )
+
+
+def test_threshold_exceeded_fails_after_durable_quarantine():
+    """BOOT-004: rejected rows are durable even though the attempt fails."""
+    bad = [
+        "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz,bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb,WRONG,"
+        "2018-01-02 10:00:00,,,,2018-01-10 00:00:00"
+        for _ in range(12)
+    ]
+    csv_text = f"{HEADER}\n" + "\n".join([_good(i) for i in range(2001, 2006)] + bad) + "\n"
+    r = _bootstrap(csv_text, "test-threshold-over")
+    assert r.returncode != 0
+    assert "threshold exceeded" in (r.stdout + r.stderr)
+    q = (
+        REPO
+        / "data"
+        / "quarantine"
+        / "bootstrap"
+        / "orders"
+        / "attempt_id=test-threshold-over"
+        / "rejected.parquet"
+    )
+    assert q.exists()
+
+
+def test_repeated_bootstrap_converges():
+    """BOOT-005: an equivalent bootstrap leaves source state unchanged."""
+    import os
+
+    import psycopg
+
+    ids = [f"{i:032x}" for i in range(3001, 3006)]
+    csv_text = f"{HEADER}\n" + "\n".join(_good(i) for i in range(3001, 3006)) + "\n"
+    try:
+        r1 = _bootstrap(csv_text, "test-idem-one")
+        assert r1.returncode == 0
+        r2 = _bootstrap(csv_text, "test-idem-two")
+        assert r2.returncode == 0
+        with psycopg.connect(os.environ["SOURCE_DSN"]) as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT order_id, source_updated_at FROM source.orders WHERE order_id = ANY(%s) ORDER BY order_id",
+                (ids,),
+            )
+            rows = cur.fetchall()
+        assert [r[0] for r in rows] == ids
+        assert len({r[1] for r in rows}) == 1, "repeated bootstrap must converge timestamps"
+    finally:
+        with psycopg.connect(os.environ["SOURCE_DSN"]) as conn, conn.cursor() as cur:
+            cur.execute("DELETE FROM source.orders WHERE order_id = ANY(%s)", (ids,))
+            conn.commit()
+
+
 def test_isolated_bad_row_quarantined_below_threshold():
     bad_status = "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz,bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb,WRONG,2018-01-02 10:00:00,,,,2018-01-10 00:00:00"
     good_rows = "\n".join(

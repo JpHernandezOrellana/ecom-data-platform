@@ -4,7 +4,7 @@
 **Document version:** 0.2  
 **Design status:** Accepted  
 **Implementation authorization:** Phase 1 authorized  
-**Project stage:** Phase 0 complete; Phase 1 not started  
+**Project stage:** Phase 1 closed; Phase 2 design not started
 **Supersedes:** `docs/archive/SDD_v1.md`  
 **Accepted by:** Juan Pablo  
 **Accepted date:** 2026-09-06  
