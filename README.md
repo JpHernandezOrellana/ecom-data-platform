@@ -4,12 +4,19 @@ A portfolio Data Engineering project designed to demonstrate reliable incrementa
 
 ## Current status
 
-**Phase:** Phase 0 complete; Phase 1 not started  
+**Phase:** Phase 1 implemented (orders fulfillment vertical slice)  
 **Design status:** Accepted on 2026-09-06  
-**Implementation status:** Not started  
+**Implementation status:** Working local pipeline; final polish pending  
 **Implementation authorization:** Phase 1 authorized  
 
-This repository currently contains the design package. It does not yet contain a runnable pipeline, Docker services, Python application, dbt project, or automated tests.
+Phase 1 delivers: Docker Compose with source + warehouse PostgreSQL, deterministic Olist
+bootstrap (99,441 orders), bounded `(source_updated_at, order_id)` extraction, Parquet
+committed batches with manifest + quarantine envelope, crash recovery, idempotent
+warehouse load, dbt `stg_orders`, versioned Gold candidate with certified-view promotion,
+and `gold.mart_daily_order_fulfillment` (one row per Chilean purchase-date cohort).
+
+Verified reconciliation: source 99,442 = silver 99,442 = gold 99,442
+(99,441 Olist + 1 deterministic demo mutation).
 
 ## Business problem
 
@@ -119,22 +126,33 @@ Phase 0 was accepted by Juan Pablo on 2026-09-06 after:
 - the original SDD was archived;
 - the accepted V2 content was promoted to canonical `SDD.md`.
 
-Phase 1 is authorized but has not been implemented. This repository must not claim that Phase 1 behavior exists until its acceptance tests pass.
+## Phase 1 runbook
 
-## Planned implementation path
+Prerequisites: Docker Desktop running, `cp -n .env.example .env`, Python 3.12 + `uv`.
 
-After Phase 0 acceptance, Phase 1 will implement:
-
-```text
-Olist orders bootstrap
--> deterministic operational mutations
--> bounded incremental extraction
--> Bronze and quarantine Parquet
--> checkpoint and run metadata
--> idempotent warehouse load
--> dbt Silver
--> tested Gold candidate
--> certified fulfillment mart
+```bash
+uv sync --extra dev
+docker compose up -d
+set -a; source .env; set +a
+uv run python -m ecom.bootstrap --csv dataset/olist_orders_dataset.csv --attempt-id boot-001
+uv run python -m ecom.extract
+uv run python -m ecom.load
+uv run python -m ecom.mutate --ts 2018-10-21T00:00:00+00:00
+uv run python -m ecom.extract
+uv run python -m ecom.load
+cd dbt && PUBLICATION_ID=phase1 uv run --project .. dbt build --profiles-dir . && cd ..
+uv run python -m ecom.publish --publication-id phase1 --tests-passed
+uv run --extra dev pytest tests/
+uv run --extra dev ruff check src tests
 ```
 
-The exact future run and test commands will be documented only when the corresponding code exists.
+Demonstrated behaviors: initial + incremental runs, idempotent rerun (`no_op`),
+crash-after-publish recovery reusing one committed batch, bootstrap structural failure,
+row quarantine below threshold, failed Gold publication preserving the certified view,
+and source = silver = gold reconciliation.
+
+## Next steps
+
+- Add CI workflow running lint + unit tests + dbt build on an ephemeral stack.
+- Harden operational extras: reader-role creation script, backfill CLI, candidate retention job.
+- Then expand to Phase 2 entities (order items + FX-gated CLP reporting).

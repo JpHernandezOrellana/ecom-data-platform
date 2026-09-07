@@ -1,0 +1,13 @@
+version: 2
+models:
+  - name: stg_orders
+    description: Latest deterministic source version of one order_id.
+    columns:
+      - name: order_id
+        tests: [not_null, unique]
+      - name: order_status
+        tests:
+          - accepted_values:
+              values: [created, approved, processing, invoiced, shipped, delivered, unavailable, canceled]
+      - name: reporting_date
+        tests: [not_null]

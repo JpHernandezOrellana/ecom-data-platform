@@ -1,0 +1,11 @@
+ecom:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: localhost
+      user: "{{ env_var('WAREHOUSE_USER', 'warehouse_app') }}"
+      pass: "{{ env_var('WAREHOUSE_PASSWORD', 'warehouse_pw_change_me') }}"
+      dbname: "{{ env_var('WAREHOUSE_DB', 'ecom_warehouse') }}"
+      schema: silver
+      port: "{{ env_var('WAREHOUSE_PORT', '5434') | int }}"

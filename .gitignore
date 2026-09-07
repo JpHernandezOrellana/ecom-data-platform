@@ -24,6 +24,7 @@ __pycache__/
 target/
 dbt_packages/
 logs/
+dbt/.user.yml
 
 # Local editor and operating-system files.
 .DS_Store

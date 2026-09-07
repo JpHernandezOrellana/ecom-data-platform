@@ -1,0 +1,14 @@
+name: ecom_orders
+version: 1.0.0
+config-version: 2
+profile: ecom
+model-paths: ["models"]
+test-paths: ["tests"]
+models:
+  ecom_orders:
+    silver:
+      +schema: silver
+      +materialized: table
+    gold_candidate:
+      +schema: gold_candidate
+      +materialized: table
