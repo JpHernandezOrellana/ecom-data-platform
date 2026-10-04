@@ -4,9 +4,11 @@ A portfolio Data Engineering project designed to demonstrate reliable incrementa
 
 ## Current status
 
-**Phase:** Phase 1 closed (orders fulfillment vertical slice)
+> **Start here:** [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md) — current state, invariants, open decisions, and task-specific reading map for any agent or contributor.
+
+**Phase:** Phase 1.1 closed (hardened orders fulfillment vertical slice)
 **Design status:** Accepted on 2026-09-06  
-**Implementation status:** Accepted locally on 2026-09-07
+**Implementation status:** Phase 1 accepted on 2026-09-07; Phase 1.1 closed locally on 2026-09-08
 **Implementation authorization:** Phase 1 authorized  
 
 Phase 1 delivers: Docker Compose with source + warehouse PostgreSQL, deterministic Olist
@@ -18,8 +20,9 @@ and `gold.mart_daily_order_fulfillment` (one row per Chilean purchase-date cohor
 Verified reconciliation: source 99,442 = silver 99,442 = gold 99,442
 (99,441 Olist + 1 deterministic demo mutation).
 
-Closure evidence, reference environment, timing, final reconciliation, and verification
-commands are recorded in [`docs/evidence/phase1-closure.md`](docs/evidence/phase1-closure.md).
+Phase 1 closure evidence is in [`docs/evidence/phase1-closure.md`](docs/evidence/phase1-closure.md).
+Phase 1.1 hardening evidence is in
+[`docs/evidence/phase1_1-closure.md`](docs/evidence/phase1_1-closure.md).
 
 ## Business problem
 
@@ -88,6 +91,7 @@ Phase 1 contains no monetary metrics.
 
 | Artifact | Purpose | Status |
 |---|---|---|
+| [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md) | Agent/contributor entry point: state, invariants, routing | Current |
 | [`SDD.md`](SDD.md) | Canonical project-specific source of truth | Accepted |
 | [`Archived SDD v1`](docs/archive/SDD_v1.md) | Original design retained for history | Superseded |
 | [`ARCHITECTURE_BIBLE.md`](ARCHITECTURE_BIBLE.md) | General architecture principles | Living guidance |
@@ -99,7 +103,9 @@ Phase 1 contains no monetary metrics.
 | [`Metric glossary`](docs/metrics.md) | Canonical Phase 1 metric semantics | Accepted |
 | [`Test matrix`](docs/testing/phase1-test-matrix.md) | Required Phase 1 verification | Accepted |
 | [`Phase 1 closure evidence`](docs/evidence/phase1-closure.md) | Acceptance results and layer reconciliation | Closed |
+| [`Phase 1.1 closure evidence`](docs/evidence/phase1_1-closure.md) | Design-alignment hardening results | Closed |
 | [`Progress report`](docs/evidence/progress-report.md) | Current phase, verification, and next-phase gates | Current |
+| [`Phase 1 implementation guide`](docs/phase1-implementation-guide.md) | Current code, decisions, evidence, and alignment status | Current |
 | [`Olist bootstrap contract`](contracts/source/olist_orders.v1.yaml) | Historical CSV boundary | Accepted |
 | [`Operational orders contract`](contracts/source/operational_orders.v1.yaml) | Incremental PostgreSQL boundary | Accepted |
 | [`Gold contract`](contracts/gold/mart_daily_order_fulfillment.v1.yaml) | Certified consumer product | Accepted |
@@ -147,7 +153,8 @@ uv run python -m ecom.mutate --ts 2018-10-21T00:00:00+00:00
 uv run python -m ecom.extract
 uv run python -m ecom.load
 cd dbt && PUBLICATION_ID=phase1 uv run --project .. dbt build --profiles-dir . && cd ..
-uv run python -m ecom.publish --publication-id phase1 --tests-passed
+uv run python -m ecom.publish --publication-id phase1 --test-results dbt/target/run_results.json --dbt-manifest dbt/target/manifest.json
+uv run python -m ecom.retention
 uv run --extra dev pytest tests/
 uv run --extra dev ruff check src tests
 ```
@@ -157,8 +164,11 @@ crash-after-publish recovery reusing one committed batch, bootstrap structural f
 row quarantine below threshold, failed Gold publication preserving the certified view,
 and source = silver = gold reconciliation.
 
+The default bootstrap command validates the pinned CSV checksum in `data/manifest.json`.
+`--allow-unverified-input` is reserved for deterministic synthetic fixtures in tests.
+
 ## Next steps
 
 - Add CI workflow running lint + unit tests + dbt build on an ephemeral stack.
-- Harden operational extras: backfill CLI and candidate retention job.
+- Keep CI and contract-validation automation local and reproducible.
 - Then expand to Phase 2 entities (order items + FX-gated CLP reporting).

@@ -27,7 +27,11 @@ If an architectural request conflicts with the SDD, propose/update an ADR before
 
 # 2. Mandatory reading before implementation
 
-Before modifying project code, read the relevant:
+Before modifying project code, always read first:
+
+- `docs/CURRENT_STATE.md` — current phase, invariants, open decisions, task-specific routing.
+
+Then read the relevant:
 
 - `SDD.md`;
 - current ADRs;
