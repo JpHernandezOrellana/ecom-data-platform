@@ -11,3 +11,8 @@ models:
               values: [created, approved, processing, invoiced, shipped, delivered, unavailable, canceled]
       - name: reporting_date
         tests: [not_null]
+  - name: mart_daily_order_fulfillment
+    description: Certified metrics by Chilean purchase-date cohort.
+    columns:
+      - name: reporting_date
+        tests: [not_null, unique]

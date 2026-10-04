@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+import uuid
 from datetime import UTC
 from pathlib import Path
 
@@ -72,7 +73,15 @@ def test_crash_recovery_reuses_committed_batch():
 
 def test_failed_publication_preserves_gold():
     before = _pg("SELECT count(*) FROM gold.mart_daily_order_fulfillment")
-    r = _run("ecom.publish", "--publication-id", "bad999")
+    r = _run(
+        "ecom.publish",
+        "--publication-id",
+        "bad999",
+        "--test-results",
+        "missing-run-results.json",
+        "--dbt-manifest",
+        "missing-manifest.json",
+    )
     assert r.returncode != 0
     after = _pg("SELECT count(*) FROM gold.mart_daily_order_fulfillment")
     assert before == after
@@ -94,7 +103,7 @@ def test_double_load_is_idempotent():
 
 
 def test_breaking_operational_schema_fails_closed():
-    """DQ-008 / SDD 35.9: incompatible source change fails before publication
+    """DQ-008 / SDD 22.2: incompatible source change fails before publication
     and the normal checkpoint does not move."""
     from datetime import datetime
 
@@ -136,12 +145,29 @@ def test_backfill_leaves_normal_checkpoint():
     from datetime import datetime
 
     ts = datetime.now(UTC).replace(microsecond=0).isoformat()
+    request_id = f"close-{uuid.uuid4().hex}"
     _run("ecom.mutate", "--ts", ts)
     checkpoint_before = _pg(
         "SELECT cursor_updated_at, cursor_key FROM control.checkpoint "
         "WHERE source_name='source_postgres' AND entity_name='orders'"
     )
-    r1 = _run("ecom.extract", "--run-mode", "backfill", "--backfill-request-id", "close1")
+    backfill_args = (
+        "--run-mode",
+        "backfill",
+        "--backfill-request-id",
+        request_id,
+        "--backfill-from-ts",
+        "2018-10-20T00:00:00+00:00",
+        "--backfill-from-key",
+        "00000000000000000000000000000000",
+        "--backfill-to-ts",
+        ts,
+        "--backfill-to-key",
+        "ffffffffffffffffffffffffffffffff",
+        "--backfill-reason",
+        "integration-test",
+    )
+    r1 = _run("ecom.extract", *backfill_args)
     assert r1.returncode == 0
     assert "extraction ok" in r1.stdout
     checkpoint_after = _pg(
@@ -153,7 +179,11 @@ def test_backfill_leaves_normal_checkpoint():
         "SELECT batch_id FROM control.batch WHERE run_mode='backfill' "
         "ORDER BY created_at DESC LIMIT 1"
     )
-    r2 = _run("ecom.extract", "--run-mode", "backfill", "--backfill-request-id", "close1")
+    assert (
+        _pg(f"SELECT status FROM control.backfill_request WHERE request_id='{request_id}'")
+        == "[('committed',)]"
+    )
+    r2 = _run("ecom.extract", "--run-mode", "backfill", "--backfill-request-id", request_id)
     assert r2.returncode == 0
     batch1_again = _pg(
         "SELECT batch_id FROM control.batch WHERE run_mode='backfill' "
@@ -161,7 +191,14 @@ def test_backfill_leaves_normal_checkpoint():
     )
     assert batch1 == batch1_again
     count1 = _pg("SELECT count(*) FROM control.batch WHERE run_mode='backfill'")
-    r3 = _run("ecom.extract", "--run-mode", "backfill", "--backfill-request-id", "close2")
+    r3 = _run(
+        "ecom.extract",
+        "--run-mode",
+        "backfill",
+        "--backfill-request-id",
+        f"{request_id}-new",
+        *backfill_args[4:],
+    )
     assert r3.returncode == 0
     batch2 = _pg(
         "SELECT batch_id FROM control.batch WHERE run_mode='backfill' "
@@ -190,13 +227,45 @@ def test_concurrent_publication_blocked():
         )
         conn.commit()
     try:
-        r = _run("ecom.publish", "--publication-id", "test-conc2", "--tests-passed")
+        r = _run(
+            "ecom.publish",
+            "--publication-id",
+            "test-conc2",
+            "--test-results",
+            "missing-run-results.json",
+            "--dbt-manifest",
+            "missing-manifest.json",
+        )
         assert r.returncode != 0
         assert "another publication is active" in (r.stdout + r.stderr)
     finally:
         with psycopg.connect(dsn) as conn, conn.cursor() as cur:
             cur.execute("DELETE FROM control.publication WHERE publication_id='test-conc-lock'")
             conn.commit()
+
+
+def test_retention_expires_failed_candidate():
+    """PUB-003: failed candidates older than seven days are removed safely."""
+    import psycopg
+
+    publication_id = f"expired_{uuid.uuid4().hex}"
+    relation = f"mart_daily_order_fulfillment__{publication_id}"
+    with psycopg.connect(os.environ["WAREHOUSE_DSN"]) as conn, conn.cursor() as cur:
+        cur.execute(f"CREATE TABLE gold_candidate.{relation} (value integer)")
+        cur.execute(
+            """INSERT INTO control.publication (
+                 product_name, publication_id, candidate_relation, status, created_at)
+               VALUES ('mart_daily_order_fulfillment', %s, %s, 'failed', now() - interval '8 days')""",
+            (publication_id, f"gold_candidate.{relation}"),
+        )
+        conn.commit()
+    result = _run("ecom.retention")
+    assert result.returncode == 0
+    assert _pg(f"SELECT to_regclass('gold_candidate.{relation}')") == "[(None,)]"
+    assert (
+        _pg(f"SELECT status FROM control.publication WHERE publication_id='{publication_id}'")
+        == "[('expired',)]"
+    )
 
 
 def test_checkpoint_cas_conflict_fails_explicitly(tmp_path):

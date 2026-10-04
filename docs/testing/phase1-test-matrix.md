@@ -4,7 +4,7 @@
 **Owner:** Juan Pablo  
 **Accepted by:** Juan Pablo  
 **Accepted date:** 2026-09-06  
-**Related SDD:** `SDD.md`, Sections 29 and 35  
+**Related SDD:** `SDD.md`, Sections 29 and 33
 
 This matrix defines required evidence before implementation. Test filenames and framework-specific organization are implementation details, but every invariant below must remain covered.
 

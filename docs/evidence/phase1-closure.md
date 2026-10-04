@@ -2,7 +2,7 @@
 
 **Status:** Closed
 **Closed on:** 2026-09-07
-**Scope:** Orders fulfillment vertical slice described in `SDD.md`, Section 35.
+**Scope:** Orders fulfillment vertical slice described in `SDD.md`, Section 33.
 
 ## Reference environment
 
@@ -62,6 +62,10 @@ PASS=7 WARN=0 ERROR=0 SKIP=0 TOTAL=7
 uv run python -m ecom.publish --publication-id phase1-close --tests-passed
 published mart_daily_order_fulfillment -> gold_candidate.mart_daily_order_fulfillment__phase1-close
 ```
+
+The historical `--tests-passed` command above was replaced during Phase 1.1 with
+artifact-verified publication; use the current README or `phase1_1-closure.md` for
+the runnable command.
 
 The test suite covers cursor boundaries, deterministic bootstrap and idempotency,
 bootstrap quarantine thresholds, schema-breaking source failure without checkpoint

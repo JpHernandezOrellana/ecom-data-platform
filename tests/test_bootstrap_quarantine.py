@@ -20,7 +20,16 @@ def _bootstrap(csv_text: str, attempt: str):
     env["PATH"] = f"{REPO}/.venv/bin:{env['PATH']}"
     try:
         r = subprocess.run(
-            [sys.executable, "-m", "ecom.bootstrap", "--csv", str(tmp), "--attempt-id", attempt],
+            [
+                sys.executable,
+                "-m",
+                "ecom.bootstrap",
+                "--csv",
+                str(tmp),
+                "--attempt-id",
+                attempt,
+                "--allow-unverified-input",
+            ],
             cwd=REPO,
             env=env,
             capture_output=True,

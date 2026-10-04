@@ -13,18 +13,45 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from .config import Settings
-from .contracts import ALLOWED_STATUSES, EXPECTED_BOOTSTRAP_HEADER
+from .contracts import BOOTSTRAP_CONTRACT_PATH, accepted_values, load_contract, schema_by_name
 from .db import connect
 from .timez import localize_source
-
-ID_RE = re.compile(r"^[0-9a-f]{32}$")
 
 
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Deterministic Olist orders bootstrap")
     p.add_argument("--csv", default="dataset/olist_orders_dataset.csv")
     p.add_argument("--attempt-id", default=None)
+    p.add_argument(
+        "--allow-unverified-input",
+        action="store_true",
+        help="Allow a synthetic fixture that is intentionally absent from the pinned manifest.",
+    )
     return p.parse_args()
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _verify_bootstrap_manifest(csv_path: Path, contract: dict) -> None:
+    manifest_path = Path(contract["dataset"]["manifest"])
+    if not manifest_path.is_absolute():
+        manifest_path = BOOTSTRAP_CONTRACT_PATH.parents[2] / manifest_path
+    manifest = json.loads(manifest_path.read_text())
+    source_file = contract["dataset"]["source_file"]
+    entry = next((item for item in manifest["files"] if item["path"] == source_file), None)
+    if entry is None:
+        raise SystemExit(f"bootstrap structural failure: manifest has no entry for {source_file}")
+    expected_hash = contract["observed_profile"]["source_file_sha256"]
+    if entry["sha256"] != expected_hash:
+        raise SystemExit("bootstrap structural failure: contract and manifest checksum disagree")
+    if _sha256_file(csv_path) != expected_hash:
+        raise SystemExit("bootstrap structural failure: input checksum does not match manifest")
 
 
 def main() -> None:
@@ -32,27 +59,42 @@ def main() -> None:
     settings = Settings.from_env()
     attempt_id = args.attempt_id or f"boot-{uuid.uuid4().hex[:12]}"
     csv_path = Path(args.csv)
+    contract = load_contract(BOOTSTRAP_CONTRACT_PATH)
+    fields = schema_by_name(contract)
+    expected_header = [field["name"] for field in contract["schema"]]
+    allowed_statuses = accepted_values(contract, "order_status")
+    order_id_re = re.compile(fields["order_id"]["pattern"])
+    customer_id_re = re.compile(fields["customer_id"]["pattern"])
+    contract_version = contract["contract_version"]
+    if not args.allow_unverified_input:
+        _verify_bootstrap_manifest(csv_path, contract)
     bootstrap_ts = datetime.fromisoformat(settings.bootstrap_loaded_at)
     if bootstrap_ts.tzinfo is None:
         bootstrap_ts = bootstrap_ts.replace(tzinfo=UTC)
 
     with csv_path.open(encoding="utf-8-sig", newline="") as h:
         reader = csv.DictReader(h)
-        if reader.fieldnames != EXPECTED_BOOTSTRAP_HEADER:
+        if reader.fieldnames != expected_header:
             raise SystemExit(f"bootstrap structural failure: unexpected header {reader.fieldnames}")
         rows = list(reader)
 
     accepted: list[dict] = []
     rejected: list[dict] = []
     seen: set[str] = set()
+    duplicate_accepted_order_id = False
     for r in rows:
         violations: list[str] = []
         oid, st = r["order_id"], r["order_status"]
-        if not oid or not ID_RE.match(oid):
+        if not oid or not order_id_re.match(oid):
             violations.append("OLIST-ORD-KEY-001")
-        if oid in seen:
+        if not r["customer_id"] or not customer_id_re.match(r["customer_id"]):
+            violations.append("OLIST-ORD-KEY-001")
+        if oid in seen and oid and order_id_re.match(oid):
             violations.append("OLIST-ORD-KEY-002")
-        if st not in ALLOWED_STATUSES:
+            duplicate_accepted_order_id = True
+        if oid and order_id_re.match(oid):
+            seen.add(oid)
+        if st not in allowed_statuses:
             violations.append("OLIST-ORD-STATUS-001")
         loc: dict[str, tuple] = {}
         for col in [
@@ -92,11 +134,10 @@ def main() -> None:
                     "order_id": oid,
                     "original_payload": payload,
                     "violation_codes": violations,
-                    "contract_version": "1.0.0",
+                    "contract_version": contract_version,
                 }
             )
             continue
-        seen.add(oid)
         accepted.append({"raw": r, "loc": loc})
 
     evaluated = len(accepted) + len(rejected)
@@ -107,8 +148,11 @@ def main() -> None:
     if rejected:
         table = pa.Table.from_pylist(rejected)
         pq.write_table(table, qdir / "rejected.parquet")
-    if len(rejected) > 10 or rate > 0.01:
+    policy = contract["rejection_policy"]
+    if len(rejected) > policy["maximum_rejected_rows"] or rate > policy["maximum_rejected_rate"]:
         raise SystemExit(f"bootstrap rejected threshold exceeded: {len(rejected)}/{evaluated}")
+    if duplicate_accepted_order_id:
+        raise SystemExit("bootstrap blocking failure: duplicate accepted order_id")
 
     # Insert accepted into source.orders
     with connect(_source_writer_dsn(settings)) as conn:

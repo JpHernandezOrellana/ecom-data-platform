@@ -1,7 +1,7 @@
 # Progress Report
 
-**Updated:** 2026-09-07
-**Current stage:** Phase 1 closed; Phase 2 design not started
+**Updated:** 2026-09-08
+**Current stage:** Phase 1.1 closed; Phase 2 design not started
 **Authoritative design:** `SDD.md`
 
 ## Phase 1 status
@@ -12,8 +12,14 @@ quarantine evidence, checkpoint recovery, idempotent raw loading, Silver and
 Gold dbt models, and candidate-to-certified Gold publication.
 
 The closure scope and the Phase 1 acceptance criteria are defined in
-`SDD.md`, Section 35. Detailed execution evidence is in
+`SDD.md`, Section 33. Detailed execution evidence is in
 `docs/evidence/phase1-closure.md`.
+
+Phase 1.1 closed the identified design-alignment gaps. The current implementation
+executes YAML-derived boundary validation, manifest verification, server-side extraction
+pages, provenance-preserving Bronze loads, fail-closed Parquet validation, auditable
+backfill requests, artifact-verified Gold promotion, direct Gold contract tests, and
+candidate retention. Evidence is in `docs/evidence/phase1_1-closure.md`.
 
 ## Reconciliation snapshot
 
