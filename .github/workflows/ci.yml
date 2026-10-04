@@ -1,0 +1,121 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  SOURCE_USER: source_app
+  SOURCE_PASSWORD: ci_source_pw
+  SOURCE_DB: ecom_source
+  SOURCE_PORT: "5433"
+  SOURCE_READER_USER: source_reader
+  SOURCE_READER_PASSWORD: ci_reader_pw
+
+  WAREHOUSE_USER: warehouse_app
+  WAREHOUSE_PASSWORD: ci_warehouse_pw
+  WAREHOUSE_DB: ecom_warehouse
+  WAREHOUSE_PORT: "5434"
+
+  SOURCE_DSN: postgresql://source_app:ci_source_pw@localhost:5433/ecom_source
+  SOURCE_READER_DSN: postgresql://source_reader:ci_reader_pw@localhost:5433/ecom_source
+  WAREHOUSE_DSN: postgresql://warehouse_app:ci_warehouse_pw@localhost:5434/ecom_warehouse
+
+  BOOTSTRAP_LOADED_AT: "2018-10-20T00:00:00+00:00"
+  DATA_DIR: ./data
+  BATCH_PAGE_SIZE: "2"
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --frozen --extra dev
+
+      - name: Lint (ruff check)
+        run: uv run --extra dev ruff check src tests
+
+      - name: Format check (ruff format)
+        run: uv run --extra dev ruff format --check src tests
+
+      - name: Unit tests (no Postgres)
+        run: uv run --extra dev pytest -m "not integration" tests/
+
+      - name: Start local Postgres stack
+        run: docker compose up -d --wait
+
+      - name: Bootstrap synthetic fixture
+        run: |
+          uv run python -m ecom.bootstrap \
+            --csv tests/fixtures/orders_small.csv \
+            --attempt-id ci-bootstrap \
+            --allow-unverified-input
+
+      - name: Create least-privilege source reader
+        run: scripts/create_source_reader.sh
+
+      - name: Initial extract
+        run: uv run python -m ecom.extract
+
+      - name: Initial load
+        run: uv run python -m ecom.load
+
+      - name: dbt build (baseline candidate)
+        working-directory: dbt
+        run: PUBLICATION_ID=ci_baseline uv run --project .. dbt build --profiles-dir .
+
+      - name: Publish baseline Gold candidate
+        run: |
+          uv run python -m ecom.publish \
+            --publication-id ci_baseline \
+            --test-results dbt/target/run_results.json \
+            --dbt-manifest dbt/target/manifest.json
+
+      - name: Integration tests (excluding final reconciliation)
+        run: |
+          uv run --extra dev pytest -m integration \
+            -k "not test_reconciliation_across_layers" \
+            tests/
+
+      - name: Converge load after integration mutations
+        run: uv run python -m ecom.load
+
+      - name: dbt build (final candidate)
+        working-directory: dbt
+        run: PUBLICATION_ID=ci_final uv run --project .. dbt build --profiles-dir .
+
+      - name: Publish final Gold candidate
+        run: |
+          uv run python -m ecom.publish \
+            --publication-id ci_final \
+            --test-results dbt/target/run_results.json \
+            --dbt-manifest dbt/target/manifest.json
+
+      - name: Reconciliation test
+        run: uv run --extra dev pytest tests/test_integration.py::test_reconciliation_across_layers
+
+      - name: Tear down local Postgres stack
+        if: always()
+        run: docker compose down -v --remove-orphans
