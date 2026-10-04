@@ -236,7 +236,8 @@ conversion FX. Tampoco ingiere items, pagos, clientes, productos, vendedores o
 geolocalizacion. No captura hard deletes ni demuestra seguridad ante escrituras
 concurrentes en la fuente.
 
-CI, una CLI de backfill, retencion automatica de candidates, Airflow,
+CI basico ya existe (`.github/workflows/ci.yml`, lint + tests + dbt build sobre fixture
+sintetico). Una CLI de backfill, retencion automatica de candidates, Airflow,
 dashboarding, cloud y componentes distribuidos quedan fuera del slice actual.
 
 ## 12. Punto de partida para Fase 2

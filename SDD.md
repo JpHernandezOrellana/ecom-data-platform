@@ -1317,7 +1317,6 @@ These targets are tested properties, not claims of production high availability.
 
 ## Phase 3 - Engineering maturity
 
-- CI provider selection;
 - automated contract validation;
 - generated dbt documentation;
 - optional lineage integration;
@@ -1406,11 +1405,17 @@ These decisions do not block Phase 1:
 - customer-history strategy beyond current state;
 - geolocation canonicalization;
 - dashboard selection;
-- CI provider;
 - Airflow scheduling details;
 - cloud, CDC, distributed, and agentic architecture.
 
 Each item becomes blocking only before the phase that implements it. Business semantics must be accepted before the corresponding model is written.
+
+**Resolved:** CI provider is GitHub Actions. Basic CI (lint, unit tests, dbt build, and a
+synthetic-fixture integration run on ephemeral PostgreSQL via the existing
+`compose.yaml`) is implemented in `.github/workflows/ci.yml` ahead of Phase 2, since it
+protects the accepted Phase 1.1 slice without introducing new architecture. Automated
+contract validation, generated dbt documentation, and optional lineage integration remain
+Phase 3 engineering-maturity work.
 
 ---
 

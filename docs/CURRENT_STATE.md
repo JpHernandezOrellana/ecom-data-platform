@@ -92,9 +92,21 @@ refreshed.
 
 - `order_items`, payments, customers, products, sellers, geolocation.
 - GMV, AOV, revenue, refunds, BRL->CLP FX conversion.
-- CI (lint/tests/dbt on an ephemeral stack).
 - Concurrent-write guarantees during extraction; hard-delete capture.
 - Airflow, dashboard, cloud infra, CDC, distributed processing, agent/MCP write access.
+
+CI exists (see §6a) but only covers the orders slice against a synthetic fixture; it is
+not yet validated against the full Olist dataset or extended to future entities.
+
+## 6a. CI
+
+`.github/workflows/ci.yml` runs on every PR and push to `main`: `uv sync --frozen`, Ruff
+lint + format check, unit tests, then a full pipeline cycle (bootstrap -> extract -> load
+-> dbt build -> publish -> integration tests -> converge -> dbt build -> publish ->
+reconciliation) against two ephemeral PostgreSQL containers started via the existing
+`compose.yaml`. It bootstraps from the small synthetic fixture
+(`tests/fixtures/orders_small.csv`, with `--allow-unverified-input`), never the full Olist
+CSV. Verified locally end-to-end before being committed.
 
 ## 6. What to read for a given task
 
@@ -118,8 +130,10 @@ narrowly scoped task.
    treated?
 2. Authoritative BRL->CLP historical FX source and its missing-day fallback policy.
 3. Data contracts for each new entity, starting with `order_items`.
-4. Whether basic CI lands before or after Phase 2 design (README suggests before; SDD
-   roadmap places CI maturity in Phase 3 — needs explicit reconciliation).
+
+Resolved: basic CI (lint, unit tests, dbt build, synthetic-fixture integration run) now
+exists and runs on every PR/push (§6a). Extending CI to cover Phase 2 entities remains
+open.
 
 Any of these that change ingestion pattern, checkpoint semantics, storage format,
 warehouse engine, orchestration, Gold grain, or metric semantics requires a new/updated

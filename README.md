@@ -63,6 +63,12 @@ The reviewed local copy contains nine files, 126,186,995 bytes, and 1,550,922 lo
 
 Raw CSV files are intentionally excluded from Git. To review the same source locally, obtain the dataset under its license and place its nine CSV files in `dataset/`. Do not rename source columns.
 
+## License
+
+Project code is released under the [MIT License](LICENSE). The Olist dataset itself is
+**not** included in this repository and remains under its original CC BY-NC-SA 4.0 terms;
+obtain it directly from Kaggle under that license.
+
 ## Brazil source and Chile reporting
 
 The project does not relabel Brazilian values as Chilean data.
@@ -167,8 +173,16 @@ and source = silver = gold reconciliation.
 The default bootstrap command validates the pinned CSV checksum in `data/manifest.json`.
 `--allow-unverified-input` is reserved for deterministic synthetic fixtures in tests.
 
+## Continuous integration
+
+Every pull request and push to `main` runs
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml): Ruff lint and format checks, unit
+tests, then a full pipeline cycle (bootstrap, extract, load, dbt build, publish,
+integration tests, and final reconciliation) against two ephemeral PostgreSQL containers
+using the repository's `compose.yaml`. CI bootstraps from a small synthetic fixture
+(`tests/fixtures/orders_small.csv`), never the full Olist CSV.
+
 ## Next steps
 
-- Add CI workflow running lint + unit tests + dbt build on an ephemeral stack.
 - Keep CI and contract-validation automation local and reproducible.
-- Then expand to Phase 2 entities (order items + FX-gated CLP reporting).
+- Expand to Phase 2 entities (order items + FX-gated CLP reporting).
