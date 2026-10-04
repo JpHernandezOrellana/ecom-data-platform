@@ -1307,13 +1307,22 @@ These targets are tested properties, not claims of production high availability.
 
 ## Phase 2 - Local commerce expansion
 
-- customers, order items, payments, products, and sellers;
-- source-currency BRL metrics;
-- authoritative historical FX dataset and CLP reporting;
-- GMV and AOV definitions;
-- additional Silver models and Gold marts;
-- broader quarantine and reconciliation;
-- Airflow after tasks work independently.
+GMV/AOV/freight/cancellation/refund semantics are accepted in ADR-005. The composite-key
+cursor pattern for multi-row-per-order entities is accepted in ADR-006. The BRL-to-CLP FX
+source and conversion policy design is accepted in ADR-007 (implementation deferred to
+Phase 2D). Sub-phases, in order:
+
+- **2A — order items + BRL commerce mart:** `order_items` contract, bootstrap, incremental
+  extraction (ADR-006 cursor), Silver, `int_order_commerce`, `mart_daily_commerce` (BRL
+  only, ADR-005 metrics).
+- **2B — payments + synthetic refunds:** `order_payments` contract and ingestion; payment
+  reconciliation diagnostics; synthetic refund event generator and `mart_daily_refunds`
+  (ADR-005).
+- **2C — products, sellers, customers:** category/seller analytics; `customer_unique_id`
+  vs `customer_id` distinction; no change to the Phase 2A/2B monetary grain.
+- **2D — FX and CLP reporting:** implement the ADR-007 design (BCB PTAX + SII Dólar
+  Observado ingestion, cross-rate, additive CLP columns).
+- Airflow after tasks work independently (unchanged).
 
 ## Phase 3 - Engineering maturity
 
@@ -1400,8 +1409,6 @@ Screenshots may supplement executable proof but cannot replace it.
 
 These decisions do not block Phase 1:
 
-- authoritative historical BRL-to-CLP rate provider and fallback-day policy;
-- Phase 2 GMV cancellation and refund treatment;
 - customer-history strategy beyond current state;
 - geolocation canonicalization;
 - dashboard selection;
@@ -1409,6 +1416,10 @@ These decisions do not block Phase 1:
 - cloud, CDC, distributed, and agentic architecture.
 
 Each item becomes blocking only before the phase that implements it. Business semantics must be accepted before the corresponding model is written.
+
+**Resolved:** GMV/AOV/freight/cancellation/refund treatment is accepted in ADR-005. The
+authoritative BRL-to-CLP rate provider and fallback-day policy is accepted in ADR-007
+(design; implementation deferred to Phase 2D).
 
 **Resolved:** CI provider is GitHub Actions. Basic CI (lint, unit tests, dbt build, and a
 synthetic-fixture integration run on ephemeral PostgreSQL via the existing

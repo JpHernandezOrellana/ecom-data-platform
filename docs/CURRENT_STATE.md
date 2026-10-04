@@ -2,7 +2,7 @@
 
 **Last updated:** 2026-10-04
 **Current phase:** Phase 1.1 closed (hardened orders fulfillment vertical slice)
-**Next phase:** Phase 2 design not started
+**Next phase:** Phase 2A design accepted (order items + BRL commerce mart); implementation not started
 
 This document is the required entry point for any agent or contributor before touching
 code. It does not replace the formal sources — it routes to them. Read this file and
@@ -67,10 +67,9 @@ Treat [`docs/evidence/phase1-closure.md`](evidence/phase1-closure.md) and
 evidence sections still show pre-1.1 numbers (28 passed / 7 dbt nodes) and have not been
 refreshed.
 
-> **Note:** there are currently uncommitted local changes on top of this closure
-> (`git status`) that appear to extend the Phase 1.1 hardening work further. Verify with
-> `git status`/`git diff` before assuming this section is fully current; update this file
-> when that work is committed.
+The repository is public at
+[`github.com/JpHernandezOrellana/ecom-data-platform`](https://github.com/JpHernandezOrellana/ecom-data-platform)
+with GitHub Actions CI on every push/PR (§6a).
 
 ## 4. Non-negotiable invariants (do not break silently)
 
@@ -90,8 +89,10 @@ refreshed.
 
 ## 5. Not implemented yet
 
-- `order_items`, payments, customers, products, sellers, geolocation.
-- GMV, AOV, revenue, refunds, BRL->CLP FX conversion.
+- `order_items`, payments, customers, products, sellers, geolocation (design accepted,
+  code not written — see §7a).
+- GMV, AOV, synthetic refunds, BRL->CLP FX conversion (definitions accepted in ADR-005/
+  ADR-006/ADR-007; no code yet).
 - Concurrent-write guarantees during extraction; hard-delete capture.
 - Airflow, dashboard, cloud infra, CDC, distributed processing, agent/MCP write access.
 
@@ -118,32 +119,62 @@ CSV. Verified locally end-to-end before being committed.
 | Touch Silver/Gold/metrics | ADR-004, `docs/metrics.md`, `contracts/gold/mart_daily_order_fulfillment.v1.yaml`, `dbt/models/silver/`, `dbt/tests/` |
 | Touch publish/retention | `src/ecom/publish.py`, `src/ecom/retention.py`, ADR-004 §publication |
 | Run or operate the pipeline | `README.md` §Phase 1 runbook |
-| Design Phase 2 | `SDD.md` roadmap section, open decisions below, `docs/evidence/progress-report.md` |
+| Build `order_items`/commerce mart (Phase 2A) | ADR-005, ADR-006, §7a below, `src/ecom/extract.py` and `src/ecom/contracts.py` as the pattern to extend |
 | Investigate a regression | `docs/evidence/*` (historical, read-only) |
 
 Do not infer architecture from filenames alone, and do not re-read the entire repo for a
 narrowly scoped task.
 
-## 7. Open decisions (must be resolved before Phase 2 monetary models)
+## 7. Resolved decisions (Phase 2 design)
 
-1. GMV/AOV definition — does `freight_value` count? How are cancellations and refunds
-   treated?
-2. Authoritative BRL->CLP historical FX source and its missing-day fallback policy.
-3. Data contracts for each new entity, starting with `order_items`.
+- **GMV/AOV/freight/cancellation/refund semantics:** accepted in
+  [ADR-005](adrs/ADR-005-commerce-metrics.md). GMV = `sum(order_items.price)`, freight
+  excluded and reported separately; eligible orders exclude `canceled`/`unavailable`;
+  refunds are not inferred from existing signals — a synthetic refund event source lands
+  in Phase 2B, reported in a separate `mart_daily_refunds`, never netted into `gmv_brl`.
+- **Composite-key cursor for `order_items`:** accepted in
+  [ADR-006](adrs/ADR-006-composite-entity-cursor.md), extending ADR-002.
+  `source_cursor_key = order_id || ':' || lpad(order_item_id, 4, '0')`; no
+  `control.checkpoint`/`control.batch` schema change needed.
+- **BRL->CLP FX source and policy:** accepted (design only) in
+  [ADR-007](adrs/ADR-007-fx-brl-clp.md): BCB PTAX (BRL/USD, buy+sell average) crossed with
+  SII Dólar Observado (CLP/USD) via USD; 7-day max carry-forward for missing days,
+  fails closed beyond that; integer half-up rounding for CLP. Implementation deferred to
+  Phase 2D — BRL ships first.
+- Data contracts for each new entity, starting with `order_items`, remain to be written
+  (next concrete step, §7a).
 
-Resolved: basic CI (lint, unit tests, dbt build, synthetic-fixture integration run) now
-exists and runs on every PR/push (§6a). Extending CI to cover Phase 2 entities remains
-open.
+Any future change to ingestion pattern, checkpoint semantics, storage format, warehouse
+engine, orchestration, Gold grain, or metric semantics beyond what these three ADRs cover
+requires its own new/updated ADR before implementation (`AGENTS.md` §23).
 
-Any of these that change ingestion pattern, checkpoint semantics, storage format,
-warehouse engine, orchestration, Gold grain, or metric semantics requires a new/updated
-ADR before implementation (`AGENTS.md` §23).
+## 7a. Phase 2A implementation plan (order items + BRL commerce mart)
+
+Not yet built. Vertical slice, in order:
+
+1. `contracts/source/olist_order_items.v1.yaml` and
+   `contracts/source/operational_order_items.v1.yaml` (mirror the `orders` contracts;
+   PK `(order_id, order_item_id)`, `price`/`freight_value` as Decimal).
+2. `source.order_items` table + index on
+   `(source_updated_at, order_id, order_item_id)` (ADR-006).
+3. Extend `src/ecom/bootstrap.py`/`contracts.py`/`extract.py`/`load.py` to be
+   entity-parameterized rather than hardcoded to `orders` (currently assumes
+   `ENTITY = "orders"` throughout — this is the required refactor, not a rewrite).
+4. `silver.stg_order_items`, then `int_order_commerce` (one row per `order_id`,
+   items pre-aggregated to avoid multiplying AOV's denominator).
+5. `gold_candidate.mart_daily_commerce__<publication_id>` -> `gold.mart_daily_commerce`
+   (BRL only, ADR-005 metrics, same purchase-date cohort grain as
+   `mart_daily_order_fulfillment`).
+6. `contracts/gold/mart_daily_commerce.v1.yaml` and dbt tests mirroring ADR-004's pattern
+   (metric rules + Silver-to-Gold reconciliation).
+7. Tests: contract/bootstrap, cursor boundaries (including padding correctness for
+   `order_item_id` 1 vs 10+), idempotent reload, reconciliation across layers — same
+   categories as the existing `orders` suite.
 
 ## 8. Recommended next slice
 
-`order_items`, because it establishes the grain required for GMV/AOV. Build it as a full
-vertical slice (contract -> incremental extraction -> Bronze/quarantine -> raw_stage ->
-Silver -> tests -> reconciliation), not just a CSV load.
+`order_items` (Phase 2A), per §7a above — the design is accepted, implementation has not
+started.
 
 ## 9. Keeping this file honest
 

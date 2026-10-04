@@ -65,19 +65,27 @@ from `source.orders`, and rejects a `DELETE` attempt.
 The following work is intentionally outside Phase 1 and does not reopen its
 acceptance:
 
-- CI provider selection and automated contract validation;
+- automated contract validation (basic CI itself now exists — see
+  `docs/CURRENT_STATE.md` §6a);
 - candidate retention automation and a backfill operator CLI;
 - orchestration with Airflow;
 - dashboarding, cloud, CDC, distributed processing, and agent access.
 
 ## Phase 2 entry gates
 
+**Update (2026-10-04):** gates 1 and 2 are now resolved — see
+`docs/CURRENT_STATE.md` §7 and ADR-005/ADR-006/ADR-007. This section is kept for
+historical context; `docs/CURRENT_STATE.md` is authoritative for current status.
+
 No Phase 2 monetary model should be implemented until these decisions are
 accepted and represented in the relevant ADRs, contracts, metrics, and tests:
 
-1. GMV, AOV, cancellation, and refund semantics.
-2. An authoritative historical BRL-to-CLP source and a fallback-day policy.
-3. Contracts for each added source entity, beginning with order items.
+1. GMV, AOV, cancellation, and refund semantics. — **Resolved:** ADR-005.
+2. An authoritative historical BRL-to-CLP source and a fallback-day policy. —
+   **Resolved (design):** ADR-007; implementation deferred to Phase 2D.
+3. Contracts for each added source entity, beginning with order items. —
+   **Still open**, tracked as the next concrete step in
+   `docs/CURRENT_STATE.md` §7a.
 
 The recommended next vertical slice is order items, because it establishes the
 item-level grain required before GMV or AOV can be defined correctly.
