@@ -1,0 +1,5 @@
+order_id,order_item_id,product_id,seller_id,shipping_limit_date,price,freight_value
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa,1,aa5d5eb4af85d064f9f3b62f8826eb66,1b0f9736d286819f6508e2668c487500,2018-01-03 10:00:00,100.00,10.00
+cccccccccccccccccccccccccccccccc,1,aa5d5eb4af85d064f9f3b62f8826eb66,9d980378e1315dc8396f77ed841edbec,2018-01-03 10:00:00,50.00,5.00
+eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee,1,9d980378e1315dc8396f77ed841edbec,1b0f9736d286819f6508e2668c487500,2017-02-19 10:00:00,30.00,3.00
+eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee,2,9d980378e1315dc8396f77ed841edbec,1b0f9736d286819f6508e2668c487500,2017-02-19 10:00:00,20.00,2.00

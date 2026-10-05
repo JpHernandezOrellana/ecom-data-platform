@@ -16,3 +16,20 @@ models:
     columns:
       - name: reporting_date
         tests: [not_null, unique]
+  - name: stg_order_items
+    description: Latest deterministic source version of one (order_id, order_item_id).
+    columns:
+      - name: order_id
+        tests: [not_null]
+      - name: order_item_id
+        tests: [not_null]
+  - name: int_order_commerce
+    description: One row per order_id with items pre-aggregated (ADR-005).
+    columns:
+      - name: order_id
+        tests: [not_null, unique]
+  - name: mart_daily_commerce
+    description: Certified BRL commerce value by Chilean purchase-date cohort (ADR-005).
+    columns:
+      - name: reporting_date
+        tests: [not_null, unique]

@@ -5,3 +5,5 @@ sources:
     tables:
       - name: raw_orders
         identifier: orders
+      - name: raw_order_items
+        identifier: order_items

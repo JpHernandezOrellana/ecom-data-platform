@@ -96,10 +96,12 @@ def _write_dbt_artifacts(base: Path, test_status: str = "pass") -> tuple[Path, P
 
 def test_publication_requires_passing_artifacts_for_the_requested_candidate(tmp_path):
     results_path, manifest_path = _write_dbt_artifacts(tmp_path)
-    _verify_dbt_candidate("phase1_1", results_path, manifest_path)
+    _verify_dbt_candidate("mart_daily_order_fulfillment", "phase1_1", results_path, manifest_path)
 
 
 def test_publication_rejects_failed_candidate_test(tmp_path):
     results_path, manifest_path = _write_dbt_artifacts(tmp_path, test_status="fail")
     with pytest.raises(ValueError, match="tests did not pass"):
-        _verify_dbt_candidate("phase1_1", results_path, manifest_path)
+        _verify_dbt_candidate(
+            "mart_daily_order_fulfillment", "phase1_1", results_path, manifest_path
+        )

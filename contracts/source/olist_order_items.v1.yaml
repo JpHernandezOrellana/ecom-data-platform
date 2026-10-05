@@ -1,0 +1,150 @@
+contract_version: 1.0.0
+status: accepted
+accepted_by: Juan Pablo
+accepted_date: 2026-10-04
+related_sdd: SDD.md
+related_adrs:
+  - docs/adrs/ADR-005-commerce-metrics.md
+  - docs/adrs/ADR-006-composite-entity-cursor.md
+dataset:
+  name: olist_order_items_bootstrap
+  owner: Juan Pablo
+  producer: Olist
+  source_type: csv
+  source_file: dataset/olist_order_items_dataset.csv
+  manifest: data/manifest.json
+  source_url: https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce
+  license: CC BY-NC-SA 4.0
+  grain: One row represents one item-sequence line of one historical Olist order.
+  primary_key:
+    - order_id
+    - order_item_id
+  currency_applicability: brl_only
+format:
+  encoding: utf-8
+  delimiter: ","
+  quote_character: '"'
+  header_required: true
+  timestamp_format: "%Y-%m-%d %H:%M:%S"
+  timestamp_source_timezone: America/Sao_Paulo
+  timestamps_are_timezone_naive: true
+schema:
+  - name: order_id
+    source_position: 1
+    logical_type: string
+    required: true
+    pattern: "^[0-9a-f]{32}$"
+    semantics: References the Olist order this item belongs to.
+  - name: order_item_id
+    source_position: 2
+    logical_type: integer
+    required: true
+    minimum: 1
+    semantics: 1-based item sequence number within one order; not a quantity.
+  - name: product_id
+    source_position: 3
+    logical_type: string
+    required: true
+    pattern: "^[0-9a-f]{32}$"
+  - name: seller_id
+    source_position: 4
+    logical_type: string
+    required: true
+    pattern: "^[0-9a-f]{32}$"
+  - name: shipping_limit_date
+    source_position: 5
+    logical_type: naive_datetime
+    required: true
+  - name: price
+    source_position: 6
+    logical_type: decimal
+    required: true
+    minimum: 0
+    scale: 2
+    semantics: Merchandise price for this item line, BRL. Excludes freight.
+  - name: freight_value
+    source_position: 7
+    logical_type: decimal
+    required: true
+    minimum: 0
+    scale: 2
+    semantics: Freight/shipping cost for this item line, BRL. Never added to GMV (ADR-005).
+timezone_resolution:
+  ambiguous_local_time:
+    action: accept_with_flag
+    fold: 0
+    resolution_code: ambiguous_fold_0
+  nonexistent_local_time:
+    action: quarantine_row
+  exact_local_time:
+    resolution_code: exact
+bootstrap_mapping:
+  shipping_limit_date: shipping_limit_at
+  generated_fields:
+    source_created_at: configured bootstrap_loaded_at in UTC
+    source_updated_at: configured bootstrap_loaded_at in UTC
+quality_rules:
+  - id: OLIST-ITEM-STRUCT-001
+    severity: blocking
+    rule: The header contains exactly the seven contracted columns in contracted order.
+  - id: OLIST-ITEM-KEY-001
+    severity: quarantine
+    rule: order_id, product_id, and seller_id are non-null and match their required patterns.
+  - id: OLIST-ITEM-KEY-002
+    severity: blocking
+    rule: Accepted (order_id, order_item_id) pairs are unique within the bootstrap input.
+  - id: OLIST-ITEM-SEQ-001
+    severity: quarantine
+    rule: order_item_id is a positive integer.
+  - id: OLIST-ITEM-MONEY-001
+    severity: quarantine
+    rule: price and freight_value are non-negative and have at most two decimal places.
+  - id: OLIST-ITEM-TIME-001
+    severity: quarantine
+    rule: shipping_limit_date is present, parses, and can be localized according to timezone_resolution.
+rejection_policy:
+  evaluated_count: accepted_count + rejected_count
+  maximum_rejected_rows: 10
+  maximum_rejected_rate: 0.01
+  on_threshold_exceeded: Fail bootstrap after durably preserving rejected rows.
+observed_profile:
+  source_file_sha256: 0bc4d068c4fe38cbb01bd90e8746e3c613fe7b4baef75fab7b0e329701c3e279
+  logical_rows: 112650
+  unique_order_item_keys: 112650
+  distinct_orders: 98666
+  distinct_products: 32951
+  distinct_sellers: 3095
+  order_item_id_range: [1, 21]
+  single_item_orders: 88863
+  price_range_brl: [0.85, 6735.00]
+  freight_value_range_brl: [0.00, 409.68]
+  zero_freight_rows: 383
+  shipping_limit_date_range: ["2016-09-19", "2020-04-09"]
+  orphan_orders: 0
+  orphan_products: 0
+  orphan_sellers: 0
+classification:
+  pii: none
+  secrets: false
+freshness:
+  expectation: not_applicable_historical_snapshot
+retention:
+  source_file: Local input retained by the operator under the source license.
+  bootstrap_quarantine: Retain for the local project unless explicitly cleaned after evidence export.
+compatibility:
+  policy: exact_versioned_bootstrap_schema
+  breaking_changes:
+    - remove or rename a contracted column
+    - change a contracted logical type
+    - change the (order_id, order_item_id) primary key semantics
+    - add a new required column
+    - add any uncontracted source column to this hash-pinned bootstrap version
+consumers:
+  - deterministic_order_items_bootstrap
+known_limitations:
+  - Source timestamps do not identify a timezone or UTC offset.
+  - There is no quantity column; each row is one item-sequence line, not a unit count.
+  - shipping_limit_date values up to 2020-04-09 fall outside the dataset's main 2016-2018
+    purchase window and are preserved as-is, not corrected.
+  - This contract does not itself enforce that order_id exists in the orders bootstrap;
+    cross-entity referential checks are a Silver/intermediate-model concern.

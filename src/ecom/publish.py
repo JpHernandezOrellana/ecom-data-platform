@@ -10,23 +10,35 @@ from psycopg import sql
 from .config import Settings
 from .db import connect, ensure_phase_1_1_warehouse_schema
 
-PRODUCT = "mart_daily_order_fulfillment"
 PUBLICATION_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
-GOLD_COLUMNS = (
-    "reporting_date",
-    "order_count",
-    "delivered_order_count",
-    "canceled_order_count",
-    "late_delivered_order_count",
-    "late_delivery_eligible_order_count",
-    "late_delivery_rate",
-    "average_delivery_duration_days",
-    "orders_with_fulfillment_quality_issue",
-)
+PRODUCTS: dict[str, tuple[str, ...]] = {
+    "mart_daily_order_fulfillment": (
+        "reporting_date",
+        "order_count",
+        "delivered_order_count",
+        "canceled_order_count",
+        "late_delivered_order_count",
+        "late_delivery_eligible_order_count",
+        "late_delivery_rate",
+        "average_delivery_duration_days",
+        "orders_with_fulfillment_quality_issue",
+    ),
+    "mart_daily_commerce": (
+        "reporting_date",
+        "eligible_order_count",
+        "gmv_brl",
+        "freight_value_brl",
+        "gross_order_value_brl",
+        "aov_brl",
+        "canceled_item_value_brl",
+        "unavailable_item_value_brl",
+    ),
+}
 
 
 def main() -> None:
     p = argparse.ArgumentParser(description="Promote tested Gold candidate via stable view")
+    p.add_argument("--product", default="mart_daily_order_fulfillment", choices=sorted(PRODUCTS))
     p.add_argument("--publication-id", required=True)
     p.add_argument("--test-results", required=True, type=Path)
     p.add_argument("--dbt-manifest", required=True, type=Path)
@@ -35,6 +47,8 @@ def main() -> None:
         raise SystemExit(
             "publication id must contain only letters, digits, underscores, or hyphens"
         )
+    PRODUCT = args.product
+    GOLD_COLUMNS = PRODUCTS[PRODUCT]
     settings = Settings.from_env()
     candidate = f"gold_candidate.{PRODUCT}__{args.publication_id}"
     with connect(settings.warehouse_dsn) as conn:
@@ -50,8 +64,10 @@ def main() -> None:
                 conn.rollback()
                 raise SystemExit("another publication is active")
             try:
-                _verify_dbt_candidate(args.publication_id, args.test_results, args.dbt_manifest)
-                _verify_candidate_relation(cur, args.publication_id)
+                _verify_dbt_candidate(
+                    PRODUCT, args.publication_id, args.test_results, args.dbt_manifest
+                )
+                _verify_candidate_relation(cur, PRODUCT, args.publication_id)
             except (
                 OSError,
                 json.JSONDecodeError,
@@ -60,7 +76,7 @@ def main() -> None:
                 ValueError,
                 SystemExit,
             ) as error:
-                _record_failed_candidate(cur, args, candidate)
+                _record_failed_candidate(cur, PRODUCT, args, candidate)
                 conn.commit()
                 raise SystemExit(
                     f"candidate verification failed; stable Gold view preserved: {error}"
@@ -99,16 +115,18 @@ def main() -> None:
     print(f"published {PRODUCT} -> {candidate}")
 
 
-def _verify_dbt_candidate(publication_id: str, results_path: Path, manifest_path: Path) -> None:
+def _verify_dbt_candidate(
+    product: str, publication_id: str, results_path: Path, manifest_path: Path
+) -> None:
     results = json.loads(results_path.read_text())
     manifest = json.loads(manifest_path.read_text())
-    expected_relation = f"gold_candidate.{PRODUCT}__{publication_id}"
+    expected_relation = f"gold_candidate.{product}__{publication_id}"
     model_id = next(
         (
             node_id
             for node_id, node in manifest.get("nodes", {}).items()
             if node.get("resource_type") == "model"
-            and node.get("name") == PRODUCT
+            and node.get("name") == product
             and node.get("relation_name", "").replace('"', "").endswith(expected_relation)
         ),
         None,
@@ -134,20 +152,20 @@ def _verify_dbt_candidate(publication_id: str, results_path: Path, manifest_path
         raise ValueError(f"dbt candidate tests did not pass: {', '.join(failed)}")
 
 
-def _verify_candidate_relation(cur, publication_id: str) -> None:
+def _verify_candidate_relation(cur, product: str, publication_id: str) -> None:
     cur.execute(
         """SELECT EXISTS (
              SELECT 1 FROM pg_class relation
              JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
              WHERE namespace.nspname='gold_candidate' AND relation.relname=%s
            )""",
-        (f"{PRODUCT}__{publication_id}",),
+        (f"{product}__{publication_id}",),
     )
     if not cur.fetchone()[0]:
         raise ValueError("requested candidate relation does not exist")
 
 
-def _record_failed_candidate(cur, args: argparse.Namespace, candidate: str) -> None:
+def _record_failed_candidate(cur, product: str, args: argparse.Namespace, candidate: str) -> None:
     cur.execute(
         """INSERT INTO control.publication (
              product_name, publication_id, candidate_relation, status, test_results_path, dbt_manifest_path)
@@ -155,7 +173,7 @@ def _record_failed_candidate(cur, args: argparse.Namespace, candidate: str) -> N
            ON CONFLICT (product_name, publication_id) DO UPDATE SET
              status='failed', test_results_path=EXCLUDED.test_results_path,
              dbt_manifest_path=EXCLUDED.dbt_manifest_path""",
-        (PRODUCT, args.publication_id, candidate, str(args.test_results), str(args.dbt_manifest)),
+        (product, args.publication_id, candidate, str(args.test_results), str(args.dbt_manifest)),
     )
 
 

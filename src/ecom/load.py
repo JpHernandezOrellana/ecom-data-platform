@@ -17,7 +17,9 @@ def main() -> None:
     settings = Settings.from_env()
     with connect(settings.warehouse_dsn) as wconn, wconn.cursor() as cur:
         ensure_phase_1_1_warehouse_schema(wconn)
-        cur.execute("SELECT batch_id, manifest_path FROM control.batch WHERE status='committed'")
+        cur.execute(
+            "SELECT batch_id, manifest_path FROM control.batch WHERE status='committed' AND entity_name='orders'"
+        )
         batches = cur.fetchall()
         for batch_id, manifest_path in batches:
             cur.execute(

@@ -86,9 +86,14 @@ jobs:
         working-directory: dbt
         run: PUBLICATION_ID=ci_baseline uv run --project .. dbt build --profiles-dir .
 
-      - name: Publish baseline Gold candidate
+      - name: Publish baseline Gold candidates
         run: |
           uv run python -m ecom.publish \
+            --publication-id ci_baseline \
+            --test-results dbt/target/run_results.json \
+            --dbt-manifest dbt/target/manifest.json
+          uv run python -m ecom.publish \
+            --product mart_daily_commerce \
             --publication-id ci_baseline \
             --test-results dbt/target/run_results.json \
             --dbt-manifest dbt/target/manifest.json
@@ -106,9 +111,14 @@ jobs:
         working-directory: dbt
         run: PUBLICATION_ID=ci_final uv run --project .. dbt build --profiles-dir .
 
-      - name: Publish final Gold candidate
+      - name: Publish final Gold candidates
         run: |
           uv run python -m ecom.publish \
+            --publication-id ci_final \
+            --test-results dbt/target/run_results.json \
+            --dbt-manifest dbt/target/manifest.json
+          uv run python -m ecom.publish \
+            --product mart_daily_commerce \
             --publication-id ci_final \
             --test-results dbt/target/run_results.json \
             --dbt-manifest dbt/target/manifest.json

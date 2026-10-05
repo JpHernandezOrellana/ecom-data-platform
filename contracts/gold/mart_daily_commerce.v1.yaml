@@ -1,0 +1,126 @@
+contract_version: 1.0.0
+metric_version: 1.0.0
+status: accepted
+accepted_by: Juan Pablo
+accepted_date: 2026-10-04
+related_sdd: SDD.md
+related_adrs:
+  - docs/adrs/ADR-005-commerce-metrics.md
+data_product:
+  name: mart_daily_commerce
+  owner: Juan Pablo
+  producer: phase_2a_dbt_project
+  relation: gold.mart_daily_commerce
+  grain: One row represents one order purchase-date cohort in America/Santiago.
+  purpose: Certified BRL commerce value (GMV, freight, AOV) for orders grouped by Chilean purchase date.
+  primary_key:
+    - reporting_date
+  currency_applicability: brl_only
+schema:
+  - name: reporting_date
+    postgresql_type: date
+    logical_type: date
+    required: true
+    semantics: Same cohort date as mart_daily_order_fulfillment (purchase instant, Sao Paulo -> UTC -> Santiago).
+  - name: eligible_order_count
+    postgresql_type: bigint
+    logical_type: integer
+    required: true
+    minimum: 0
+    semantics: Distinct orders with at least one item, excluding canceled/unavailable (ADR-005).
+  - name: gmv_brl
+    postgresql_type: numeric(18,2)
+    logical_type: decimal
+    required: true
+    minimum: 0
+    semantics: sum(order_items.price) over eligible orders. Excludes freight.
+  - name: freight_value_brl
+    postgresql_type: numeric(18,2)
+    logical_type: decimal
+    required: true
+    minimum: 0
+    semantics: sum(order_items.freight_value) over eligible orders.
+  - name: gross_order_value_brl
+    postgresql_type: numeric(18,2)
+    logical_type: decimal
+    required: true
+    minimum: 0
+    semantics: gmv_brl + freight_value_brl. Never called "revenue".
+  - name: aov_brl
+    postgresql_type: numeric(18,2)
+    logical_type: decimal
+    required: false
+    minimum: 0
+    semantics: gmv_brl / eligible_order_count. Null when eligible_order_count is zero.
+  - name: canceled_item_value_brl
+    postgresql_type: numeric(18,2)
+    logical_type: decimal
+    required: true
+    minimum: 0
+    semantics: sum(price) for items on orders whose latest status is canceled. Diagnostic only, excluded from gmv_brl.
+  - name: unavailable_item_value_brl
+    postgresql_type: numeric(18,2)
+    logical_type: decimal
+    required: true
+    minimum: 0
+    semantics: sum(price) for items on orders whose latest status is unavailable. Diagnostic only, excluded from gmv_brl.
+metrics:
+  canonical_glossary: docs/adrs/ADR-005-commerce-metrics.md
+  included:
+    - eligible_order_count
+    - gmv_brl
+    - freight_value_brl
+    - gross_order_value_brl
+    - aov_brl
+    - canceled_item_value_brl
+    - unavailable_item_value_brl
+quality_rules:
+  - id: GOLD-COM-GRAIN-001
+    severity: blocking
+    rule: reporting_date is unique and non-null.
+  - id: GOLD-COM-MONEY-001
+    severity: blocking
+    rule: gmv_brl, freight_value_brl, gross_order_value_brl, canceled_item_value_brl, and unavailable_item_value_brl are non-negative.
+  - id: GOLD-COM-MONEY-002
+    severity: blocking
+    rule: gross_order_value_brl equals gmv_brl + freight_value_brl exactly.
+  - id: GOLD-COM-AOV-001
+    severity: blocking
+    rule: aov_brl is null exactly when eligible_order_count is zero; otherwise it equals gmv_brl / eligible_order_count.
+  - id: GOLD-COM-RECON-001
+    severity: blocking
+    rule: gmv_brl reconciles to sum(price) over eligible order items grouped by reporting_date in the Silver/intermediate layer.
+freshness:
+  cadence: daily_capable_and_manually_triggerable
+  healthy_run_target_minutes: 15
+publication:
+  candidate_schema: gold_candidate
+  candidate_relation_pattern: mart_daily_commerce__<publication_id>
+  certified_relation: gold.mart_daily_commerce
+  certified_relation_type: view
+  promotion: Replace the stable view and record publication metadata in one warehouse transaction after all required tests pass.
+  failed_candidate_behavior: Preserve the previously certified view target.
+  retention:
+    successful_candidates: 5
+    failed_candidate_days: 7
+classification:
+  pii: none
+  secrets: false
+retention:
+  certified_product: Retain the current certified view and its referenced candidate.
+compatibility:
+  policy: backward
+  breaking_changes:
+    - change grain or reporting date role
+    - change a metric formula or eligibility rule
+    - remove or rename a contracted field
+    - include freight in gmv_brl
+consumers:
+  - analyst
+  - portfolio_reviewer
+known_limitations:
+  - BRL only; CLP conversion is deferred to Phase 2D (ADR-007).
+  - gmv_brl is gross of unobserved refunds; refunds are reported separately once the
+    Phase 2B synthetic refund source exists (ADR-005), never netted here.
+  - An order_item referencing an order_id absent from stg_orders is excluded from this
+    mart rather than quarantined at this layer (known Phase 2A limitation).

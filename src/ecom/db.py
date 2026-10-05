@@ -7,6 +7,10 @@ from pathlib import Path
 import psycopg
 
 _PHASE_1_1_MIGRATION = Path(__file__).resolve().parents[2] / "sql/warehouse/003_phase1_1.sql"
+_PHASE_2A_WAREHOUSE_MIGRATION = (
+    Path(__file__).resolve().parents[2] / "sql/warehouse/004_order_items.sql"
+)
+_PHASE_2A_SOURCE_MIGRATION = Path(__file__).resolve().parents[2] / "sql/source/002_order_items.sql"
 
 
 def connect(dsn: str, *, retries: int = 0, base_delay_s: float = 1.0) -> psycopg.Connection:
@@ -40,4 +44,18 @@ def ensure_phase_1_1_warehouse_schema(conn: psycopg.Connection) -> None:
     """Apply the idempotent local migration for existing Compose volumes."""
     with conn.cursor() as cur:
         cur.execute(_PHASE_1_1_MIGRATION.read_text())
+    conn.commit()
+
+
+def ensure_phase_2a_warehouse_schema(conn: psycopg.Connection) -> None:
+    """Apply the idempotent raw_stage.order_items migration (Phase 2A)."""
+    with conn.cursor() as cur:
+        cur.execute(_PHASE_2A_WAREHOUSE_MIGRATION.read_text())
+    conn.commit()
+
+
+def ensure_phase_2a_source_schema(conn: psycopg.Connection) -> None:
+    """Apply the idempotent source.order_items migration (Phase 2A)."""
+    with conn.cursor() as cur:
+        cur.execute(_PHASE_2A_SOURCE_MIGRATION.read_text())
     conn.commit()

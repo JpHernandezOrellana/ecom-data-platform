@@ -9,6 +9,9 @@ models:
     silver:
       +schema: silver
       +materialized: table
+    intermediate:
+      +schema: silver
+      +materialized: table
     gold_candidate:
       +schema: gold_candidate
       +materialized: table

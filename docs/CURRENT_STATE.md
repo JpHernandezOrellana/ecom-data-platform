@@ -1,8 +1,8 @@
 # Current Project State
 
-**Last updated:** 2026-10-04
-**Current phase:** Phase 1.1 closed (hardened orders fulfillment vertical slice)
-**Next phase:** Phase 2A design accepted (order items + BRL commerce mart); implementation not started
+**Last updated:** 2026-10-05
+**Current phase:** Phase 2A implemented locally (order items + BRL commerce mart), not yet closed/evidenced
+**Next phase:** Phase 2B (payments + synthetic refunds)
 
 This document is the required entry point for any agent or contributor before touching
 code. It does not replace the formal sources — it routes to them. Read this file and
@@ -17,7 +17,7 @@ Olist Brazilian e-commerce orders. See [`README.md`](../README.md) for the full 
 
 ## 2. What exists today (implemented and verified)
 
-One complete, closed vertical slice for **orders fulfillment**:
+### Orders fulfillment (Phase 1.1, closed)
 
 ```text
 Olist orders CSV -> source PostgreSQL -> bounded incremental extraction (cursor)
@@ -26,8 +26,6 @@ Olist orders CSV -> source PostgreSQL -> bounded incremental extraction (cursor)
   -> versioned Gold candidate -> required tests -> certified Gold view
   (gold.mart_daily_order_fulfillment)
 ```
-
-Concretely, the codebase implements:
 
 - Deterministic bootstrap from a checksum-pinned CSV, with contract validation and
   duplicate-key rejection (`src/ecom/bootstrap.py`).
@@ -45,6 +43,45 @@ Concretely, the codebase implements:
   candidate never replaces the certified view (`src/ecom/publish.py`).
 - Candidate retention as an independent command (`src/ecom/retention.py`).
 - dbt tests asserting Gold contract rules and Silver-to-Gold reconciliation.
+
+### Order items + BRL commerce mart (Phase 2A, implemented, not yet closed)
+
+```text
+Olist order_items CSV -> source.order_items (composite cursor, ADR-006)
+  -> committed batch envelope -> Bronze/Quarantine Parquet
+  -> raw_stage.order_items -> dbt silver.stg_order_items -> int_order_commerce
+  -> versioned Gold candidate -> required tests -> certified Gold view
+  (gold.mart_daily_commerce)
+```
+
+- `src/ecom/bootstrap_items.py`, `src/ecom/extract_items.py`, `src/ecom/load_items.py`:
+  parallel, entity-specific modules (not a generic multi-entity framework) mirroring the
+  orders pipeline, reusing `cursor.py`/`batchid.py`/`timez.py`/`db.py`.
+- `source.order_items.source_cursor_key` is a Postgres generated column implementing
+  ADR-006's padded composite key; `cursor.build_predicate` now takes an optional
+  `key_column` (default `order_id`, unchanged for orders).
+- `src/ecom/load.py` and `load_items.py` each filter `control.batch` by `entity_name`
+  (fixed a real cross-contamination bug: the original `load.py` query had no entity
+  filter and would have tried to load `order_items` Bronze into `raw_stage.orders` once a
+  second entity existed).
+- `src/ecom/publish.py` and `retention.py` are now parameterized by `--product` /
+  a small `PRODUCTS` registry (two products: `mart_daily_order_fulfillment`,
+  `mart_daily_commerce`); default remains `mart_daily_order_fulfillment` for backward
+  compatibility.
+- dbt: `silver.stg_order_items`, `silver.int_order_commerce` (one row per `order_id`,
+  items pre-aggregated), `gold_candidate.mart_daily_commerce__<id>` ->
+  `gold.mart_daily_commerce`, with `assert_commerce_mart_metric_rules` and
+  `assert_commerce_mart_reconciles_to_silver` dbt tests mirroring ADR-004's pattern.
+- Verified locally end-to-end (bootstrap -> extract -> load -> dbt build -> publish,
+  twice, baseline and final, matching the CI shape) with a 4-row fixture
+  (`tests/fixtures/order_items_small.csv`): GMV correctly excludes freight and excludes
+  the `canceled` order's item value (see worked example in ADR-005).
+- Known Phase 2A limitation (documented in the Gold contract): an `order_item` referencing
+  an `order_id` absent from `stg_orders` is excluded from `int_order_commerce` via inner
+  join, not quarantined — acceptable for now, not yet covered by a dedicated test.
+- Not yet done: no dedicated closure evidence doc for Phase 2A (unlike `phase1_1-closure.md`);
+  `mutate_items.py`-equivalent for exercising incremental updates/backfill on `order_items`
+  does not exist yet (only initial bootstrap + single extraction have been exercised).
 
 ## 3. Latest verification (Phase 1.1 closure, 2026-09-08)
 
@@ -85,29 +122,46 @@ with GitHub Actions CI on every push/PR (§6a).
   quarantined (`docs/metrics.md`).
 - Gold grain: one row per purchase-date cohort in `gold.mart_daily_order_fulfillment`; it is
   not a delivery-event or state-change history (ADR-004).
-- Phase 1/1.1 has no monetary metrics and no entities beyond orders.
+- `gmv_brl` excludes freight and excludes `canceled`/`unavailable` orders; never relabel
+  it "revenue"; never net refunds into it (ADR-005).
+- `order_items` cursor key is `order_id || ':' || lpad(order_item_id, 4, '0')`
+  (`source.order_items.source_cursor_key`, a generated column) — never reimplement this
+  padding ad hoc for a new composite-key entity without following ADR-006's pattern.
+- No CLP columns exist yet; BRL ships alone until ADR-007 is implemented (Phase 2D).
 
 ## 5. Not implemented yet
 
-- `order_items`, payments, customers, products, sellers, geolocation (design accepted,
-  code not written — see §7a).
-- GMV, AOV, synthetic refunds, BRL->CLP FX conversion (definitions accepted in ADR-005/
-  ADR-006/ADR-007; no code yet).
-- Concurrent-write guarantees during extraction; hard-delete capture.
+- Payments, customers, products, sellers, geolocation (Phase 2B/2C, design not started
+  beyond the refund-handling sketch in ADR-005).
+- Synthetic refunds and `mart_daily_refunds` (ADR-005, Phase 2B — order_items/GMV ship
+  first, refunds come after payments).
+- BRL->CLP FX conversion (ADR-007 design accepted; implementation deferred to Phase 2D).
+- Backfill/crash-recovery/CAS-conflict test coverage for `order_items` specifically (the
+  orders suite covers these; `order_items` so far only has a bootstrap+extract+load
+  idempotency test, not the full failure-injection matrix).
+- Concurrent-write guarantees during extraction; hard-delete capture (unchanged from
+  Phase 1, applies to `order_items` too).
 - Airflow, dashboard, cloud infra, CDC, distributed processing, agent/MCP write access.
 
-CI exists (see §6a) but only covers the orders slice against a synthetic fixture; it is
-not yet validated against the full Olist dataset or extended to future entities.
+CI (`.github/workflows/ci.yml`) now exercises both `orders` and `order_items` against
+synthetic fixtures, including both products' publish step (§6a). It has not been
+validated against the full Olist dataset for either entity.
 
 ## 6a. CI
 
 `.github/workflows/ci.yml` runs on every PR and push to `main`: `uv sync --frozen`, Ruff
-lint + format check, unit tests, then a full pipeline cycle (bootstrap -> extract -> load
--> dbt build -> publish -> integration tests -> converge -> dbt build -> publish ->
-reconciliation) against two ephemeral PostgreSQL containers started via the existing
-`compose.yaml`. It bootstraps from the small synthetic fixture
-(`tests/fixtures/orders_small.csv`, with `--allow-unverified-input`), never the full Olist
-CSV. Verified locally end-to-end before being committed.
+lint + format check, unit tests, then a full pipeline cycle (bootstrap orders -> extract
+-> load -> dbt build -> publish both products -> integration tests -> converge -> dbt
+build -> publish both products -> reconciliation) against two ephemeral PostgreSQL
+containers started via the existing `compose.yaml`. `order_items` bootstrap/extract/load
+happens inside the integration pytest step (`tests/test_phase2a_items.py`), not as
+separate CI steps; by the time the "final" dbt build runs, `raw_stage.order_items` has
+real rows, so `mart_daily_commerce`'s dbt tests run against real data in the final
+candidate (the baseline candidate is trivially empty, same pattern as orders before its
+first mutation). Bootstraps use small synthetic fixtures
+(`tests/fixtures/orders_small.csv`, `tests/fixtures/order_items_small.csv`, with
+`--allow-unverified-input`), never the full Olist CSVs. Verified locally end-to-end
+(the exact CI command sequence, run against local Docker) before being committed.
 
 ## 6. What to read for a given task
 
@@ -119,7 +173,7 @@ CSV. Verified locally end-to-end before being committed.
 | Touch Silver/Gold/metrics | ADR-004, `docs/metrics.md`, `contracts/gold/mart_daily_order_fulfillment.v1.yaml`, `dbt/models/silver/`, `dbt/tests/` |
 | Touch publish/retention | `src/ecom/publish.py`, `src/ecom/retention.py`, ADR-004 §publication |
 | Run or operate the pipeline | `README.md` §Phase 1 runbook |
-| Build `order_items`/commerce mart (Phase 2A) | ADR-005, ADR-006, §7a below, `src/ecom/extract.py` and `src/ecom/contracts.py` as the pattern to extend |
+| Touch `order_items`/commerce mart (Phase 2A) | ADR-005, ADR-006, §7a below, `src/ecom/*_items.py`, `dbt/models/intermediate/int_order_commerce.sql` |
 | Investigate a regression | `docs/evidence/*` (historical, read-only) |
 
 Do not infer architecture from filenames alone, and do not re-read the entire repo for a
@@ -148,33 +202,27 @@ Any future change to ingestion pattern, checkpoint semantics, storage format, wa
 engine, orchestration, Gold grain, or metric semantics beyond what these three ADRs cover
 requires its own new/updated ADR before implementation (`AGENTS.md` §23).
 
-## 7a. Phase 2A implementation plan (order items + BRL commerce mart)
+## 7a. Phase 2A status (order items + BRL commerce mart)
 
-Not yet built. Vertical slice, in order:
+Implemented and locally verified (§2); not yet "closed" in the Phase 1.1 sense (no
+closure-evidence doc, no failure-injection test matrix for `order_items` yet). Remaining
+work before calling 2A done:
 
-1. `contracts/source/olist_order_items.v1.yaml` and
-   `contracts/source/operational_order_items.v1.yaml` (mirror the `orders` contracts;
-   PK `(order_id, order_item_id)`, `price`/`freight_value` as Decimal).
-2. `source.order_items` table + index on
-   `(source_updated_at, order_id, order_item_id)` (ADR-006).
-3. Extend `src/ecom/bootstrap.py`/`contracts.py`/`extract.py`/`load.py` to be
-   entity-parameterized rather than hardcoded to `orders` (currently assumes
-   `ENTITY = "orders"` throughout — this is the required refactor, not a rewrite).
-4. `silver.stg_order_items`, then `int_order_commerce` (one row per `order_id`,
-   items pre-aggregated to avoid multiplying AOV's denominator).
-5. `gold_candidate.mart_daily_commerce__<publication_id>` -> `gold.mart_daily_commerce`
-   (BRL only, ADR-005 metrics, same purchase-date cohort grain as
-   `mart_daily_order_fulfillment`).
-6. `contracts/gold/mart_daily_commerce.v1.yaml` and dbt tests mirroring ADR-004's pattern
-   (metric rules + Silver-to-Gold reconciliation).
-7. Tests: contract/bootstrap, cursor boundaries (including padding correctness for
-   `order_item_id` 1 vs 10+), idempotent reload, reconciliation across layers — same
-   categories as the existing `orders` suite.
+1. Failure-injection tests for `order_items`: crash-after-publish recovery, checkpoint
+   CAS conflict, backfill request, breaking-schema fail-closed — mirroring
+   `tests/test_integration.py`'s coverage for `orders`.
+2. A quarantine/test for an `order_item` whose `order_id` is absent from `stg_orders`
+   (currently silently excluded via inner join — documented but untested).
+3. A closure-evidence doc (`docs/evidence/phase2a-closure.md`) once the above lands and a
+   full clean run is captured.
+4. Decide whether `order_items` needs its own `mutate_items`-equivalent for demonstrating
+   incremental updates (orders has `ecom.mutate`; items only has initial bootstrap so far).
 
 ## 8. Recommended next slice
 
-`order_items` (Phase 2A), per §7a above — the design is accepted, implementation has not
-started.
+Close out Phase 2A per §7a, then Phase 2B: `order_payments` contract + ingestion, payment
+reconciliation diagnostics, and the synthetic refund event generator +
+`mart_daily_refunds` (ADR-005).
 
 ## 9. Keeping this file honest
 

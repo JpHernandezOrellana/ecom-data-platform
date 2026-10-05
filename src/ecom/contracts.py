@@ -7,6 +7,10 @@ import yaml
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 BOOTSTRAP_CONTRACT_PATH = REPOSITORY_ROOT / "contracts/source/olist_orders.v1.yaml"
 OPERATIONAL_CONTRACT_PATH = REPOSITORY_ROOT / "contracts/source/operational_orders.v1.yaml"
+ITEM_BOOTSTRAP_CONTRACT_PATH = REPOSITORY_ROOT / "contracts/source/olist_order_items.v1.yaml"
+ITEM_OPERATIONAL_CONTRACT_PATH = (
+    REPOSITORY_ROOT / "contracts/source/operational_order_items.v1.yaml"
+)
 
 
 def load_contract(path: str | Path) -> dict:

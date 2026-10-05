@@ -6,10 +6,11 @@ A portfolio Data Engineering project designed to demonstrate reliable incrementa
 
 > **Start here:** [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md) — current state, invariants, open decisions, and task-specific reading map for any agent or contributor.
 
-**Phase:** Phase 1.1 closed (hardened orders fulfillment vertical slice)
-**Design status:** Accepted on 2026-09-06  
+**Phase:** Phase 1.1 closed (orders fulfillment); Phase 2A implemented locally (order
+items + BRL commerce mart), not yet closed
+**Design status:** Accepted on 2026-09-06; Phase 2A design (ADR-005/006/007) accepted on 2026-10-04
 **Implementation status:** Phase 1 accepted on 2026-09-07; Phase 1.1 closed locally on 2026-09-08
-**Implementation authorization:** Phase 1 authorized  
+**Implementation authorization:** Phase 1 authorized; Phase 2A implementation underway
 
 Phase 1 delivers: Docker Compose with source + warehouse PostgreSQL, deterministic Olist
 bootstrap (99,441 orders), bounded `(source_updated_at, order_id)` extraction, Parquet
@@ -19,6 +20,11 @@ and `gold.mart_daily_order_fulfillment` (one row per Chilean purchase-date cohor
 
 Verified reconciliation: source 99,442 = silver 99,442 = gold 99,442
 (99,441 Olist + 1 deterministic demo mutation).
+
+Phase 2A adds `order_items` ingestion with a composite cursor key (ADR-006) and a BRL-only
+`gold.mart_daily_commerce` (GMV, freight, AOV; ADR-005). Verified locally end-to-end
+against synthetic fixtures; not yet run against the full Olist dataset or given a
+closure-evidence document. See [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md) §7a.
 
 Phase 1 closure evidence is in [`docs/evidence/phase1-closure.md`](docs/evidence/phase1-closure.md).
 Phase 1.1 hardening evidence is in
@@ -118,13 +124,18 @@ Phase 1 contains no monetary metrics.
 | [`Olist bootstrap contract`](contracts/source/olist_orders.v1.yaml) | Historical CSV boundary | Accepted |
 | [`Operational orders contract`](contracts/source/operational_orders.v1.yaml) | Incremental PostgreSQL boundary | Accepted |
 | [`Gold contract`](contracts/gold/mart_daily_order_fulfillment.v1.yaml) | Certified consumer product | Accepted |
+| [`Olist order_items contract`](contracts/source/olist_order_items.v1.yaml) | Historical CSV boundary (Phase 2A) | Accepted |
+| [`Operational order_items contract`](contracts/source/operational_order_items.v1.yaml) | Incremental PostgreSQL boundary (Phase 2A) | Accepted |
+| [`Commerce Gold contract`](contracts/gold/mart_daily_commerce.v1.yaml) | Certified BRL commerce product (Phase 2A) | Accepted |
 
 ## Deliberate scope
 
-Phase 1 contains one complete orders vertical slice. It deliberately excludes:
+Phase 1 contains one complete orders vertical slice. Phase 2A adds one more
+(`order_items` + BRL GMV/AOV). Both deliberately exclude:
 
-- GMV and average order value;
-- customers, items, payments, products, and sellers;
+- payments, customers, products, and sellers (Phase 2B/2C);
+- synthetic refunds and net-of-refund metrics (Phase 2B, ADR-005);
+- BRL->CLP conversion (Phase 2D, ADR-007 design accepted, not implemented);
 - Airflow;
 - dashboarding;
 - cloud infrastructure;
@@ -176,14 +187,32 @@ and source = silver = gold reconciliation.
 The default bootstrap command validates the pinned CSV checksum in `data/manifest.json`.
 `--allow-unverified-input` is reserved for deterministic synthetic fixtures in tests.
 
+## Phase 2A runbook (order items + BRL commerce)
+
+Run after the Phase 1 runbook above, against the same running stack:
+
+```bash
+uv run python -m ecom.bootstrap_items --csv dataset/olist_order_items_dataset.csv --attempt-id boot-items-001
+uv run python -m ecom.extract_items
+uv run python -m ecom.load_items
+cd dbt && PUBLICATION_ID=phase2a uv run --project .. dbt build --profiles-dir . && cd ..
+uv run python -m ecom.publish --product mart_daily_commerce --publication-id phase2a --test-results dbt/target/run_results.json --dbt-manifest dbt/target/manifest.json
+```
+
+`gold.mart_daily_commerce` is then queryable alongside `gold.mart_daily_order_fulfillment`.
+See [ADR-005](docs/adrs/ADR-005-commerce-metrics.md) for the GMV/AOV definitions and
+[ADR-006](docs/adrs/ADR-006-composite-entity-cursor.md) for the `order_items` cursor.
+
 ## Continuous integration
 
 Every pull request and push to `main` runs
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml): Ruff lint and format checks, unit
-tests, then a full pipeline cycle (bootstrap, extract, load, dbt build, publish,
-integration tests, and final reconciliation) against two ephemeral PostgreSQL containers
-using the repository's `compose.yaml`. CI bootstraps from a small synthetic fixture
-(`tests/fixtures/orders_small.csv`), never the full Olist CSV.
+tests, then a full pipeline cycle (bootstrap, extract, load, dbt build, publish both Gold
+products, integration tests — including the `order_items` vertical slice — and final
+reconciliation) against two ephemeral PostgreSQL containers using the repository's
+`compose.yaml`. CI bootstraps from small synthetic fixtures
+(`tests/fixtures/orders_small.csv`, `tests/fixtures/order_items_small.csv`), never the
+full Olist CSVs.
 
 ## Next steps
 
