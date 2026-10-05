@@ -1316,9 +1316,9 @@ Phase 2D). Sub-phases, in order:
   bootstrap, incremental and backfill extraction (ADR-006 cursor), Silver,
   `int_order_commerce`, `mart_daily_commerce` (BRL only, ADR-005 metrics). Evidence:
   `docs/evidence/phase2a-closure.md`.
-- **2B — payments + synthetic refunds:** `order_payments` contract and ingestion; payment
-  reconciliation diagnostics; synthetic refund event generator and `mart_daily_refunds`
-  (ADR-005).
+- **2B — payments + synthetic refunds (in progress):** `order_payments` contract and
+  ingestion, payment reconciliation diagnostics (`int_payment_reconciliation`) — **done**.
+  Synthetic refund event generator and `mart_daily_refunds` — **not started**.
 - **2C — products, sellers, customers:** category/seller analytics; `customer_unique_id`
   vs `customer_id` distinction; no change to the Phase 2A/2B monetary grain.
 - **2D — FX and CLP reporting:** implement the ADR-007 design (BCB PTAX + SII Dólar

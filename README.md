@@ -25,8 +25,11 @@ Verified reconciliation: source 99,442 = silver 99,442 = gold 99,442
 Phase 2A adds `order_items` ingestion with a composite cursor key (ADR-006), both
 incremental and backfill extraction, and a BRL-only `gold.mart_daily_commerce` (GMV,
 freight, AOV; ADR-005), with the same failure-injection test coverage as orders and a
-blocking no-orphan-items invariant (GOLD-COM-ORPHAN-001). Verified locally end-to-end
-against synthetic fixtures; not yet run against the full Olist dataset.
+blocking no-orphan-items invariant (GOLD-COM-ORPHAN-001). Phase 2B adds `order_payments`
+ingestion and a payment-reconciliation diagnostic model (`int_payment_reconciliation`,
+never a GMV input); the synthetic refund generator and `mart_daily_refunds` are still
+pending. Verified locally end-to-end against synthetic fixtures; not yet run against the
+full Olist dataset.
 
 Phase 1 closure evidence is in [`docs/evidence/phase1-closure.md`](docs/evidence/phase1-closure.md).
 Phase 1.1 hardening evidence is in
@@ -132,6 +135,8 @@ Phase 1 contains no monetary metrics.
 | [`Olist order_items contract`](contracts/source/olist_order_items.v1.yaml) | Historical CSV boundary (Phase 2A) | Accepted |
 | [`Operational order_items contract`](contracts/source/operational_order_items.v1.yaml) | Incremental PostgreSQL boundary (Phase 2A) | Accepted |
 | [`Commerce Gold contract`](contracts/gold/mart_daily_commerce.v1.yaml) | Certified BRL commerce product (Phase 2A) | Accepted |
+| [`Olist order_payments contract`](contracts/source/olist_order_payments.v1.yaml) | Historical CSV boundary (Phase 2B) | Accepted |
+| [`Operational order_payments contract`](contracts/source/operational_order_payments.v1.yaml) | Incremental PostgreSQL boundary (Phase 2B) | Accepted |
 
 ## Deliberate scope
 

@@ -1,8 +1,9 @@
 # Current Project State
 
 **Last updated:** 2026-10-05
-**Current phase:** Phase 2A closed (order items + BRL commerce mart)
-**Next phase:** Phase 2B (payments + synthetic refunds)
+**Current phase:** Phase 2B in progress — order_payments ingestion done; synthetic
+refunds + `mart_daily_refunds` not started
+**Next phase:** finish Phase 2B (synthetic refunds), then Phase 2C (products/sellers/customers)
 
 This document is the required entry point for any agent or contributor before touching
 code. It does not replace the formal sources — it routes to them. Read this file and
@@ -90,6 +91,36 @@ Olist order_items CSV -> source.order_items (composite cursor, ADR-006)
   equivalent CLI (incremental-update demos use direct test-only inserts); backfill mode
   untested against equal-timestamp ties at scale.
 
+### Order payments ingestion (Phase 2B, in progress — refunds not started)
+
+```text
+Olist order_payments CSV -> source.order_payments (composite cursor, ADR-006)
+  -> committed batch envelope -> Bronze/Quarantine Parquet
+  -> raw_stage.order_payments -> dbt silver.stg_order_payments
+  -> silver.int_payment_reconciliation (diagnostic only)
+```
+
+- `src/ecom/bootstrap_payments.py`, `extract_payments.py` (incremental + backfill),
+  `load_payments.py`: same entity-specific pattern as `*_items.py`. No business timestamp
+  exists in this source (unlike `shipping_limit_date` for items); only simulator-owned
+  `source_created_at`/`source_updated_at`.
+- `silver.int_payment_reconciliation`: diagnostic model comparing `sum(payment_value)` to
+  `price + freight_value` per order. Disagreement is **expected** (ADR-005) and is never a
+  blocking test or a GMV input — it exists for inspection only.
+- `assert_no_orphan_order_payments`: a payment whose `order_id` is absent from
+  `stg_orders` fails the build (checked against `stg_orders` directly, not
+  `int_order_commerce`, since an order can legitimately have payments without ever having
+  items — 775 such orders exist in the full Olist dataset; that must stay visible, not be
+  conflated with a true orphan).
+- Failure-injection tests for `order_payments` (`tests/test_phase2b_payments.py`): same
+  categories as `order_items` (crash recovery, CAS conflict, backfill, breaking schema).
+- Verified locally end-to-end (exact CI sequence, fresh Docker volume): dbt build
+  baseline+final 30/30 each; all three fixture orders reconcile exactly
+  (`payment_item_diff_brl = 0`).
+- **Not yet done:** the synthetic refund event generator and `mart_daily_refunds`
+  (ADR-005) — this is the remaining half of Phase 2B. No Gold product changes from
+  payments ingestion alone; `mart_daily_commerce` is unaffected.
+
 ## 3. Latest verification (Phase 1.1 closure, 2026-09-08)
 
 ```text
@@ -138,22 +169,19 @@ with GitHub Actions CI on every push/PR (§6a).
 
 ## 5. Not implemented yet
 
-- Payments, customers, products, sellers, geolocation (Phase 2B/2C, design not started
-  beyond the refund-handling sketch in ADR-005).
-- Synthetic refunds and `mart_daily_refunds` (ADR-005, Phase 2B — order_items/GMV ship
-  first, refunds come after payments).
+- Synthetic refunds and `mart_daily_refunds` (ADR-005) — the remaining half of Phase 2B,
+  see §2's "order payments ingestion" section.
+- Customers, products, sellers, geolocation (Phase 2C, design not started).
 - BRL->CLP FX conversion (ADR-007 design accepted; implementation deferred to Phase 2D).
-- Backfill mode for `order_items` (`extract_items.py` only supports incremental
-  extraction; `orders`-style `--run-mode backfill` does not exist yet for items). Crash
-  recovery, checkpoint CAS conflict, and breaking-schema fail-closed are now covered
-  (`tests/test_phase2a_items.py`).
+- No `mutate_items`/`mutate_payments`-equivalent CLI for either entity; incremental-update
+  demos use direct test-only inserts.
 - Concurrent-write guarantees during extraction; hard-delete capture (unchanged from
-  Phase 1, applies to `order_items` too).
+  Phase 1, applies to `order_items`/`order_payments` too).
 - Airflow, dashboard, cloud infra, CDC, distributed processing, agent/MCP write access.
 
-CI (`.github/workflows/ci.yml`) now exercises both `orders` and `order_items` against
-synthetic fixtures, including both products' publish step (§6a). It has not been
-validated against the full Olist dataset for either entity.
+CI (`.github/workflows/ci.yml`) now exercises `orders`, `order_items`, and
+`order_payments` against synthetic fixtures, including both Gold products' publish step
+(§6a). It has not been validated against the full Olist dataset for any entity.
 
 ## 6a. CI
 
@@ -182,6 +210,7 @@ first mutation). Bootstraps use small synthetic fixtures
 | Touch publish/retention | `src/ecom/publish.py`, `src/ecom/retention.py`, ADR-004 §publication |
 | Run or operate the pipeline | `README.md` §Phase 1 runbook |
 | Touch `order_items`/commerce mart (Phase 2A) | ADR-005, ADR-006, §7a below, `src/ecom/*_items.py`, `dbt/models/intermediate/int_order_commerce.sql` |
+| Touch `order_payments`/reconciliation (Phase 2B) | ADR-005, ADR-006, `src/ecom/*_payments.py`, `dbt/models/intermediate/int_payment_reconciliation.sql` |
 | Investigate a regression | `docs/evidence/*` (historical, read-only) |
 
 Do not infer architecture from filenames alone, and do not re-read the entire repo for a
@@ -222,9 +251,11 @@ carried forward into later phases:
 
 ## 8. Recommended next slice
 
-Phase 2B: `order_payments` contract + ingestion, payment reconciliation diagnostics
-against `price + freight_value`, and the synthetic refund event generator feeding
-`mart_daily_refunds` (ADR-005).
+Finish Phase 2B: the synthetic refund event generator (parallel to `ecom.mutate`,
+appending to a dedicated `source.order_refunds`-style table referencing an existing
+`(order_id, payment_sequential)`) and `mart_daily_refunds`, grained by refund date, per
+ADR-005. `order_payments` ingestion and reconciliation diagnostics are already done
+(§2).
 
 ## 9. Keeping this file honest
 
