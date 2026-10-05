@@ -1,6 +1,6 @@
 # Current Project State
 
-**Last updated:** 2026-10-05
+**Last updated:** 2026-10-05 (failure-injection tests added)
 **Current phase:** Phase 2A implemented locally (order items + BRL commerce mart), not yet closed/evidenced
 **Next phase:** Phase 2B (payments + synthetic refunds)
 
@@ -136,9 +136,10 @@ with GitHub Actions CI on every push/PR (§6a).
 - Synthetic refunds and `mart_daily_refunds` (ADR-005, Phase 2B — order_items/GMV ship
   first, refunds come after payments).
 - BRL->CLP FX conversion (ADR-007 design accepted; implementation deferred to Phase 2D).
-- Backfill/crash-recovery/CAS-conflict test coverage for `order_items` specifically (the
-  orders suite covers these; `order_items` so far only has a bootstrap+extract+load
-  idempotency test, not the full failure-injection matrix).
+- Backfill mode for `order_items` (`extract_items.py` only supports incremental
+  extraction; `orders`-style `--run-mode backfill` does not exist yet for items). Crash
+  recovery, checkpoint CAS conflict, and breaking-schema fail-closed are now covered
+  (`tests/test_phase2a_items.py`).
 - Concurrent-write guarantees during extraction; hard-delete capture (unchanged from
   Phase 1, applies to `order_items` too).
 - Airflow, dashboard, cloud infra, CDC, distributed processing, agent/MCP write access.
@@ -205,18 +206,20 @@ requires its own new/updated ADR before implementation (`AGENTS.md` §23).
 ## 7a. Phase 2A status (order items + BRL commerce mart)
 
 Implemented and locally verified (§2); not yet "closed" in the Phase 1.1 sense (no
-closure-evidence doc, no failure-injection test matrix for `order_items` yet). Remaining
-work before calling 2A done:
+closure-evidence doc yet). Crash recovery, checkpoint CAS conflict, and breaking-schema
+fail-closed are now covered for `order_items` (`tests/test_phase2a_items.py`), mirroring
+`tests/test_integration.py`'s coverage for `orders`. Remaining work before calling 2A
+done:
 
-1. Failure-injection tests for `order_items`: crash-after-publish recovery, checkpoint
-   CAS conflict, backfill request, breaking-schema fail-closed — mirroring
-   `tests/test_integration.py`'s coverage for `orders`.
+1. Backfill mode for `order_items` (`extract_items.py` only supports incremental
+   extraction today).
 2. A quarantine/test for an `order_item` whose `order_id` is absent from `stg_orders`
    (currently silently excluded via inner join — documented but untested).
 3. A closure-evidence doc (`docs/evidence/phase2a-closure.md`) once the above lands and a
    full clean run is captured.
 4. Decide whether `order_items` needs its own `mutate_items`-equivalent for demonstrating
-   incremental updates (orders has `ecom.mutate`; items only has initial bootstrap so far).
+   incremental updates from a bootstrap-like baseline (the new failure-injection tests
+   insert synthetic rows directly rather than going through a `mutate`-style CLI).
 
 ## 8. Recommended next slice
 
