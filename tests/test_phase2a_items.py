@@ -31,6 +31,9 @@ def _flush_and_clean_order_items_module():
     any non-fixture order_id out of every layer, regardless of which test created it.
     """
     yield
+    # This module also contains plain unit tests collected by the "not integration" run,
+    # where no Postgres is reachable at all (SOURCE_DSN is set but nothing listens on
+    # it); the connect() calls below fail fast and are caught, skipping the sweep.
     import psycopg
 
     env = os.environ.copy()
@@ -42,18 +45,25 @@ def _flush_and_clean_order_items_module():
         capture_output=True,
         check=False,
     )
-    with psycopg.connect(os.environ["SOURCE_DSN"]) as conn, conn.cursor() as cur:
-        cur.execute(
-            "DELETE FROM source.order_items WHERE order_id != ALL(%s)",
-            (list(_FIXTURE_ORDER_IDS),),
-        )
-        conn.commit()
-    with psycopg.connect(os.environ["WAREHOUSE_DSN"]) as conn, conn.cursor() as cur:
-        cur.execute(
-            "DELETE FROM raw_stage.order_items WHERE order_id != ALL(%s)",
-            (list(_FIXTURE_ORDER_IDS),),
-        )
-        conn.commit()
+    source_dsn = os.environ.get("SOURCE_DSN")
+    warehouse_dsn = os.environ.get("WAREHOUSE_DSN")
+    if not source_dsn or not warehouse_dsn:
+        return
+    try:
+        with psycopg.connect(source_dsn) as conn, conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM source.order_items WHERE order_id != ALL(%s)",
+                (list(_FIXTURE_ORDER_IDS),),
+            )
+            conn.commit()
+        with psycopg.connect(warehouse_dsn) as conn, conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM raw_stage.order_items WHERE order_id != ALL(%s)",
+                (list(_FIXTURE_ORDER_IDS),),
+            )
+            conn.commit()
+    except psycopg.OperationalError:
+        pass
 
 
 def _pg(query: str) -> str:
