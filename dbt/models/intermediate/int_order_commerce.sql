@@ -1,9 +1,9 @@
 {{ config(schema='silver', materialized='table', contract={'enforced': False}) }}
 
 -- Grain: one row per order_id with items pre-aggregated (ADR-005), so GMV/AOV never
--- multiply the order denominator by item count. Orders with items but no matching
--- stg_orders row are excluded here (known Phase 2A limitation, documented in the
--- mart_daily_commerce contract).
+-- multiply the order denominator by item count. The inner join would silently exclude
+-- an order_item whose order_id is absent from stg_orders; assert_no_orphan_order_items
+-- (GOLD-COM-ORPHAN-001) fails the build instead, so that case is never silent.
 with item_totals as (
   select
     order_id,

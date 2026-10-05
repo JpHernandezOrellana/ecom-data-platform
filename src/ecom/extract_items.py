@@ -49,6 +49,13 @@ def _validate_operational_row(row: dict, contract: dict) -> list[str]:
 
 def main() -> None:
     p = argparse.ArgumentParser(description="Bounded incremental order_items extraction")
+    p.add_argument("--run-mode", default="incremental", choices=["incremental", "backfill"])
+    p.add_argument("--backfill-request-id", default="")
+    p.add_argument("--backfill-from-ts", default="")
+    p.add_argument("--backfill-from-key", default="")
+    p.add_argument("--backfill-to-ts", default="")
+    p.add_argument("--backfill-to-key", default="")
+    p.add_argument("--backfill-reason", default="")
     p.add_argument(
         "--fail-after-publish",
         action="store_true",
@@ -73,13 +80,24 @@ def main() -> None:
         row = cur.fetchone()
         before_ts, before_key = (row[0], row[1]) if row else (None, None)
 
-    recovered = _try_recover(settings, before_ts, before_key)
-    if recovered:
-        print(f"recovered committed batch {recovered} without re-extraction")
-        return
-    lower_ts, lower_key = before_ts, before_key
-    upper_ts = upper_key = None
-    has_lower = before_ts is not None
+    is_backfill = args.run_mode == "backfill"
+    if is_backfill and not args.backfill_request_id:
+        raise SystemExit("backfill mode requires --backfill-request-id")
+    if bool(args.backfill_from_ts) != bool(args.backfill_from_key):
+        raise SystemExit("backfill --backfill-from-ts and --backfill-from-key go together")
+    if bool(args.backfill_to_ts) != bool(args.backfill_to_key):
+        raise SystemExit("backfill --backfill-to-ts and --backfill-to-key go together")
+    if is_backfill:
+        lower_ts, lower_key, upper_ts, upper_key = _prepare_backfill_request(settings, args)
+        has_lower = True
+    else:
+        recovered = _try_recover(settings, before_ts, before_key)
+        if recovered:
+            print(f"recovered committed batch {recovered} without re-extraction")
+            return
+        lower_ts, lower_key = before_ts, before_key
+        upper_ts = upper_key = None
+        has_lower = before_ts is not None
 
     accepted: list[dict] = []
     rejected: list[dict] = []
@@ -94,15 +112,16 @@ def main() -> None:
             (nulls,) = cur.fetchone()  # type: ignore
             if nulls:
                 raise SystemExit(f"extraction blocking failure: {nulls} null cursor components")
-            cur.execute(
-                "SELECT source_updated_at, source_cursor_key FROM source.order_items "
-                "ORDER BY source_updated_at DESC, source_cursor_key DESC LIMIT 1"
-            )
-            top = cur.fetchone()
-            if top is None:
-                print("no_op: source empty")
-                return
-            upper_ts, upper_key = top
+            if not is_backfill:
+                cur.execute(
+                    "SELECT source_updated_at, source_cursor_key FROM source.order_items "
+                    "ORDER BY source_updated_at DESC, source_cursor_key DESC LIMIT 1"
+                )
+                top = cur.fetchone()
+                if top is None:
+                    print("no_op: source empty")
+                    return
+                upper_ts, upper_key = top
             assert upper_ts is not None and upper_key is not None
             params = {"upper_ts": upper_ts, "upper_key": upper_key}
             if has_lower:
@@ -168,7 +187,8 @@ def main() -> None:
         cursor_before=cursor_before_s,
         cursor_upper=cursor_upper_s,
         contract_version=contract_version,
-        run_mode="incremental",
+        run_mode=args.run_mode,
+        backfill_request_id=args.backfill_request_id,
     )
     if len(rejected) > 10 or rate > 0.01:
         fdir = (
@@ -210,7 +230,7 @@ def main() -> None:
         "attempt_id": attempt_id,
         "source": SOURCE_NAME,
         "entity": ENTITY,
-        "run_mode": "incremental",
+        "run_mode": args.run_mode,
         "cursor_before": cursor_before_s,
         "cursor_upper": cursor_upper_s,
         "accepted_count": len(accepted),
@@ -237,16 +257,21 @@ def main() -> None:
     if args.fail_after_publish:
         raise SystemExit("injected crash after filesystem publication, before checkpoint commit")
 
-    _commit_checkpoint(
-        settings,
-        manifest,
-        str(committed / "manifest.json"),
-        run_id,
-        before_ts,
-        before_key,
-        upper_ts,
-        upper_key,
-    )
+    if is_backfill:
+        _register_backfill_batch(
+            settings, manifest, str(committed / "manifest.json"), run_id, args.backfill_request_id
+        )
+    else:
+        _commit_checkpoint(
+            settings,
+            manifest,
+            str(committed / "manifest.json"),
+            run_id,
+            before_ts,
+            before_key,
+            upper_ts,
+            upper_key,
+        )
     print(f"extraction ok: batch={batch_id} accepted={len(accepted)} rejected={len(rejected)}")
 
 
@@ -260,7 +285,7 @@ def _try_recover(settings: Settings, before_ts, before_key) -> str | None:
             m = json.loads(manifest_path.read_text())
         except (OSError, json.JSONDecodeError):
             continue
-        if m.get("cursor_before") != want:
+        if m.get("cursor_before") != want or m.get("run_mode", "incremental") != "incremental":
             continue
         with connect(settings.warehouse_dsn) as wconn, wconn.cursor() as cur:
             cur.execute(
@@ -314,6 +339,91 @@ def _parse_cursor_key(cursor_s: str):
     if cursor_s == "NONE":
         return None
     return cursor_s.split("|")[1]
+
+
+def _prepare_backfill_request(
+    settings: Settings, args: argparse.Namespace
+) -> tuple[datetime, str, datetime, str]:
+    """Create or resume one bounded, auditable backfill request (ADR-002, extended by ADR-006)."""
+    with connect(settings.warehouse_dsn) as conn, conn.cursor() as cur:
+        ensure_phase_1_1_warehouse_schema(conn)
+        cur.execute(
+            """SELECT cursor_from_updated_at, cursor_from_key, cursor_to_updated_at, cursor_to_key
+               FROM control.backfill_request WHERE request_id=%s AND source_name=%s AND entity_name=%s""",
+            (args.backfill_request_id, SOURCE_NAME, ENTITY),
+        )
+        existing = cur.fetchone()
+        if existing:
+            stored_from_ts, stored_from_key, stored_to_ts, stored_to_key = existing
+            supplied = (
+                args.backfill_from_ts,
+                args.backfill_from_key,
+                args.backfill_to_ts,
+                args.backfill_to_key,
+            )
+            stored = (
+                stored_from_ts.isoformat(),
+                stored_from_key,
+                stored_to_ts.isoformat(),
+                stored_to_key,
+            )
+            if any(supplied) and supplied != stored:
+                raise SystemExit("backfill request cursor does not match its registered window")
+            return stored_from_ts, stored_from_key, stored_to_ts, stored_to_key
+
+        if not all(
+            (
+                args.backfill_from_ts,
+                args.backfill_from_key,
+                args.backfill_to_ts,
+                args.backfill_to_key,
+                args.backfill_reason,
+            )
+        ):
+            raise SystemExit(
+                "new backfill requires --backfill-from-*, --backfill-to-*, and --backfill-reason"
+            )
+        from_ts = datetime.fromisoformat(args.backfill_from_ts)
+        to_ts = datetime.fromisoformat(args.backfill_to_ts)
+        if (to_ts, args.backfill_to_key) <= (from_ts, args.backfill_from_key):
+            raise SystemExit("backfill upper cursor must be greater than its lower cursor")
+        cur.execute(
+            """INSERT INTO control.backfill_request (
+                 request_id, source_name, entity_name, cursor_from_updated_at, cursor_from_key,
+                 cursor_to_updated_at, cursor_to_key, reason, status)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,'pending')""",
+            (
+                args.backfill_request_id,
+                SOURCE_NAME,
+                ENTITY,
+                from_ts,
+                args.backfill_from_key,
+                to_ts,
+                args.backfill_to_key,
+                args.backfill_reason,
+            ),
+        )
+        conn.commit()
+    return from_ts, args.backfill_from_key, to_ts, args.backfill_to_key
+
+
+def _register_backfill_batch(
+    settings: Settings, manifest: dict, manifest_path: str, run_id: str, request_id: str
+) -> None:
+    """Register backfill evidence and request state without moving the normal checkpoint."""
+    _verify_manifest_files(Path(manifest_path).parent, manifest)
+    with connect(settings.warehouse_dsn) as wconn, wconn.cursor() as cur:
+        _insert_batch(cur, manifest, manifest_path, run_id)
+        cur.execute(
+            """UPDATE control.backfill_request
+               SET batch_id=%s, status='committed', completed_at=now()
+               WHERE request_id=%s AND source_name=%s AND entity_name=%s""",
+            (manifest["batch_id"], request_id, SOURCE_NAME, ENTITY),
+        )
+        if cur.rowcount != 1:
+            wconn.rollback()
+            raise SystemExit("backfill request was not registered")
+        wconn.commit()
 
 
 def _commit_checkpoint(

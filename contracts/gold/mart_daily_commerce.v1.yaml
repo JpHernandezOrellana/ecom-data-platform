@@ -90,6 +90,9 @@ quality_rules:
   - id: GOLD-COM-RECON-001
     severity: blocking
     rule: gmv_brl reconciles to sum(price) over eligible order items grouped by reporting_date in the Silver/intermediate layer.
+  - id: GOLD-COM-ORPHAN-001
+    severity: blocking
+    rule: No order_item may reference an order_id absent from stg_orders (no silent loss, AGENTS.md 6.8); such rows fail the build rather than being silently excluded.
 freshness:
   cadence: daily_capable_and_manually_triggerable
   healthy_run_target_minutes: 15
@@ -122,5 +125,6 @@ known_limitations:
   - BRL only; CLP conversion is deferred to Phase 2D (ADR-007).
   - gmv_brl is gross of unobserved refunds; refunds are reported separately once the
     Phase 2B synthetic refund source exists (ADR-005), never netted here.
-  - An order_item referencing an order_id absent from stg_orders is excluded from this
-    mart rather than quarantined at this layer (known Phase 2A limitation).
+- An order_item referencing an order_id absent from stg_orders fails the dbt build
+  (GOLD-COM-ORPHAN-001) rather than being quarantined row-by-row; recovering from this
+  requires fixing upstream extraction/bootstrap ordering, not editing this mart.
