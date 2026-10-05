@@ -3,6 +3,8 @@
 import os
 import subprocess
 import sys
+import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -10,6 +12,52 @@ import pytest
 from ecom.cursor import build_predicate
 
 REPO = Path(__file__).resolve().parents[1]
+
+
+def _pg(query: str) -> str:
+    import psycopg
+
+    with psycopg.connect(os.environ["WAREHOUSE_DSN"]) as conn, conn.cursor() as cur:
+        cur.execute(query)
+        try:
+            return str(cur.fetchall())
+        except psycopg.ProgrammingError:
+            return "ok"
+
+
+def _insert_source_item(order_id: str, item_id: int, source_updated_at: datetime) -> None:
+    import psycopg
+
+    with psycopg.connect(os.environ["SOURCE_DSN"]) as conn, conn.cursor() as cur:
+        cur.execute(
+            """INSERT INTO source.order_items (
+                 order_id, order_item_id, product_id, seller_id,
+                 shipping_limit_at, shipping_limit_at_source_text, shipping_limit_at_timezone_resolution,
+                 price, freight_value, source_created_at, source_updated_at)
+               VALUES (%s,%s,%s,%s,%s,%s,'synthetic_aware',%s,%s,%s,%s)
+               ON CONFLICT (order_id, order_item_id) DO UPDATE SET source_updated_at = EXCLUDED.source_updated_at""",
+            (
+                order_id,
+                item_id,
+                "a" * 32,
+                "b" * 32,
+                source_updated_at,
+                source_updated_at.isoformat(),
+                "10.00",
+                "1.00",
+                source_updated_at,
+                source_updated_at,
+            ),
+        )
+        conn.commit()
+
+
+def _delete_source_item(order_id: str) -> None:
+    import psycopg
+
+    with psycopg.connect(os.environ["SOURCE_DSN"]) as conn, conn.cursor() as cur:
+        cur.execute("DELETE FROM source.order_items WHERE order_id = %s", (order_id,))
+        conn.commit()
 
 
 def _source_cursor_key(order_id: str, order_item_id: int) -> str:
@@ -110,3 +158,123 @@ def test_order_items_vertical_slice_is_idempotent_and_reconciles():
                 "'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee')"
             )
             conn.commit()
+
+
+@pytest.mark.integration
+def test_items_crash_recovery_reuses_committed_batch():
+    """Mirrors ORD crash-after-publish recovery (ADR-002), for the ADR-006 composite cursor."""
+    order_id = uuid.uuid4().hex
+    ts = datetime.now(UTC)
+    try:
+        _insert_source_item(order_id, 1, ts)
+        r1 = _run("ecom.extract_items", "--fail-after-publish")
+        assert r1.returncode != 0
+        assert "injected crash" in (r1.stdout + r1.stderr)
+        before = sorted(
+            (REPO / "data" / "committed_batches" / "order_items").rglob("manifest.json")
+        )
+        r2 = _run("ecom.extract_items")
+        assert r2.returncode == 0, r2.stdout + r2.stderr
+        after = sorted((REPO / "data" / "committed_batches" / "order_items").rglob("manifest.json"))
+        assert len(after) == len(before), "retry must not write a second committed batch"
+        assert "recovered committed batch" in r2.stdout or "extraction ok" in r2.stdout
+    finally:
+        _delete_source_item(order_id)
+
+
+@pytest.mark.integration
+def test_items_checkpoint_cas_conflict_fails_explicitly():
+    """COMMIT-006 equivalent for order_items: a stale committer is rejected before writing."""
+    import tempfile
+
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    from ecom.config import Settings
+    from ecom.extract_items import _commit_checkpoint
+
+    order_id = uuid.uuid4().hex
+    ts = datetime.now(UTC)
+    try:
+        _insert_source_item(order_id, 1, ts)
+        r = _run("ecom.extract_items")
+        assert r.returncode == 0, r.stdout + r.stderr
+
+        existing = _pg(
+            "SELECT cursor_updated_at FROM control.checkpoint "
+            "WHERE source_name='source_postgres' AND entity_name='order_items'"
+        )
+        assert existing != "[]", "checkpoint must exist for a CAS-conflict probe"
+        with tempfile.TemporaryDirectory() as d:
+            base = Path(d)
+            (base / "bronze").mkdir()
+            pq.write_table(pa.table({"a": [1]}), base / "bronze" / "accepted.parquet")
+            from ecom.extract import _sha256_file
+
+            manifest = {
+                "batch_id": "test-items-cas-probe",
+                "run_mode": "incremental",
+                "cursor_before": "NONE",
+                "cursor_upper": "2099-01-01T00:00:00+00:00|zz:9999",
+                "accepted_count": 1,
+                "rejected_count": 0,
+                "files": {
+                    "bronze/accepted.parquet": _sha256_file(base / "bronze" / "accepted.parquet")
+                },
+            }
+            with pytest.raises(SystemExit, match="compare-and-swap conflict"):
+                _commit_checkpoint(
+                    Settings.from_env(),
+                    manifest,
+                    str(base / "manifest.json"),
+                    "run-probe",
+                    None,
+                    None,
+                    datetime.fromisoformat("2099-01-01T00:00:00+00:00"),
+                    "zz:9999",
+                )
+        probe = _pg("SELECT count(*) FROM control.batch WHERE batch_id='test-items-cas-probe'")
+        assert probe == "[(0,)]"
+    finally:
+        _delete_source_item(order_id)
+
+
+@pytest.mark.integration
+def test_items_breaking_operational_schema_fails_closed():
+    """Incompatible source change fails before publication; checkpoint does not move."""
+    import psycopg
+
+    order_id = uuid.uuid4().hex
+    ts = datetime.now(UTC)
+    try:
+        _insert_source_item(order_id, 1, ts)
+        checkpoint_before = _pg(
+            "SELECT cursor_updated_at, cursor_key FROM control.checkpoint "
+            "WHERE source_name='source_postgres' AND entity_name='order_items'"
+        )
+        manifests_before = sorted(
+            (REPO / "data" / "committed_batches" / "order_items").rglob("manifest.json")
+        )
+        dsn = os.environ["SOURCE_DSN"]
+        with psycopg.connect(dsn) as conn, conn.cursor() as cur:
+            cur.execute("ALTER TABLE source.order_items RENAME COLUMN price TO price_broken")
+            conn.commit()
+        try:
+            r = _run("ecom.extract_items")
+            assert r.returncode != 0
+            assert "no_op" not in (r.stdout + r.stderr)
+        finally:
+            with psycopg.connect(dsn) as conn, conn.cursor() as cur:
+                cur.execute("ALTER TABLE source.order_items RENAME COLUMN price_broken TO price")
+                conn.commit()
+        checkpoint_after = _pg(
+            "SELECT cursor_updated_at, cursor_key FROM control.checkpoint "
+            "WHERE source_name='source_postgres' AND entity_name='order_items'"
+        )
+        manifests_after = sorted(
+            (REPO / "data" / "committed_batches" / "order_items").rglob("manifest.json")
+        )
+        assert checkpoint_before == checkpoint_after
+        assert manifests_before == manifests_after
+    finally:
+        _delete_source_item(order_id)

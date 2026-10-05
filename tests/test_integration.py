@@ -355,10 +355,15 @@ def test_reconciliation_across_layers():
     assert r.returncode == 0
     import psycopg
 
-    manifests = sorted((REPO / "data" / "committed_batches").rglob("*/batch_id=*/manifest.json"))
+    manifests = sorted(
+        (REPO / "data" / "committed_batches" / "orders").rglob("batch_id=*/manifest.json")
+    )
     assert manifests, "expected committed batch manifests"
     with psycopg.connect(os.environ["WAREHOUSE_DSN"]) as conn, conn.cursor() as cur:
-        cur.execute("SELECT batch_id, manifest_path FROM control.batch WHERE status='committed'")
+        cur.execute(
+            "SELECT batch_id, manifest_path FROM control.batch "
+            "WHERE status='committed' AND entity_name='orders'"
+        )
         registered = {row[0]: row[1] for row in cur.fetchall()}
     # COMMIT-011: manifests on disk match registered committed batches exactly.
     on_disk = {}
