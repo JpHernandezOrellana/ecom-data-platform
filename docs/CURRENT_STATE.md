@@ -1,8 +1,9 @@
 # Current Project State
 
 **Last updated:** 2026-10-05
-**Current phase:** Phase 2B in progress — order_payments ingestion done; synthetic
-refunds + `mart_daily_refunds` not started
+**Current phase:** Phase 2B in progress — order_payments ingestion closed (evidence:
+`docs/evidence/phase2b-payments-closure.md`); synthetic refunds + `mart_daily_refunds`
+not started
 **Next phase:** finish Phase 2B (synthetic refunds), then Phase 2C (products/sellers/customers)
 
 This document is the required entry point for any agent or contributor before touching
@@ -120,6 +121,9 @@ Olist order_payments CSV -> source.order_payments (composite cursor, ADR-006)
 - **Not yet done:** the synthetic refund event generator and `mart_daily_refunds`
   (ADR-005) — this is the remaining half of Phase 2B. No Gold product changes from
   payments ingestion alone; `mart_daily_commerce` is unaffected.
+- Closure evidence for this slice:
+  [`docs/evidence/phase2b-payments-closure.md`](evidence/phase2b-payments-closure.md)
+  (explicitly not a full Phase 2B closure).
 
 ## 3. Latest verification (Phase 1.1 closure, 2026-09-08)
 

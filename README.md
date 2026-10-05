@@ -36,6 +36,9 @@ Phase 1.1 hardening evidence is in
 [`docs/evidence/phase1_1-closure.md`](docs/evidence/phase1_1-closure.md).
 Phase 2A closure evidence is in
 [`docs/evidence/phase2a-closure.md`](docs/evidence/phase2a-closure.md).
+Phase 2B payments-ingestion evidence (one of two Phase 2B deliverables; synthetic refunds
+remain open) is in
+[`docs/evidence/phase2b-payments-closure.md`](docs/evidence/phase2b-payments-closure.md).
 
 ## Business problem
 
@@ -127,6 +130,7 @@ Phase 1 contains no monetary metrics.
 | [`Phase 1 closure evidence`](docs/evidence/phase1-closure.md) | Acceptance results and layer reconciliation | Closed |
 | [`Phase 1.1 closure evidence`](docs/evidence/phase1_1-closure.md) | Design-alignment hardening results | Closed |
 | [`Phase 2A closure evidence`](docs/evidence/phase2a-closure.md) | Order items + BRL commerce results | Closed |
+| [`Phase 2B payments evidence`](docs/evidence/phase2b-payments-closure.md) | Order payments ingestion + reconciliation diagnostic | Payments slice closed; refunds open |
 | [`Progress report`](docs/evidence/progress-report.md) | Current phase, verification, and next-phase gates | Current |
 | [`Phase 1 implementation guide`](docs/phase1-implementation-guide.md) | Current code, decisions, evidence, and alignment status | Current |
 | [`Olist bootstrap contract`](contracts/source/olist_orders.v1.yaml) | Historical CSV boundary | Accepted |
