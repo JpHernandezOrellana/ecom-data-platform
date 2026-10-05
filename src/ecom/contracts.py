@@ -11,6 +11,10 @@ ITEM_BOOTSTRAP_CONTRACT_PATH = REPOSITORY_ROOT / "contracts/source/olist_order_i
 ITEM_OPERATIONAL_CONTRACT_PATH = (
     REPOSITORY_ROOT / "contracts/source/operational_order_items.v1.yaml"
 )
+PAYMENT_BOOTSTRAP_CONTRACT_PATH = REPOSITORY_ROOT / "contracts/source/olist_order_payments.v1.yaml"
+PAYMENT_OPERATIONAL_CONTRACT_PATH = (
+    REPOSITORY_ROOT / "contracts/source/operational_order_payments.v1.yaml"
+)
 
 
 def load_contract(path: str | Path) -> dict:

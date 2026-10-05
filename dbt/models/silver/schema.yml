@@ -33,3 +33,17 @@ models:
     columns:
       - name: reporting_date
         tests: [not_null, unique]
+  - name: stg_order_payments
+    description: Latest deterministic source version of one (order_id, payment_sequential).
+    columns:
+      - name: order_id
+        tests: [not_null]
+      - name: payment_sequential
+        tests: [not_null]
+  - name: int_payment_reconciliation
+    description: >
+      Diagnostic only (ADR-005): compares sum(payment_value) to price+freight_value per
+      order. Disagreement is expected and documented; never used for GMV/AOV.
+    columns:
+      - name: order_id
+        tests: [not_null, unique]

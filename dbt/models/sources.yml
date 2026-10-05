@@ -7,3 +7,5 @@ sources:
         identifier: orders
       - name: raw_order_items
         identifier: order_items
+      - name: raw_order_payments
+        identifier: order_payments

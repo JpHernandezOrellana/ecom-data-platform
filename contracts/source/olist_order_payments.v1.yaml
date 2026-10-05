@@ -1,0 +1,135 @@
+contract_version: 1.0.0
+status: accepted
+accepted_by: Juan Pablo
+accepted_date: 2026-10-05
+related_sdd: SDD.md
+related_adrs:
+  - docs/adrs/ADR-005-commerce-metrics.md
+  - docs/adrs/ADR-006-composite-entity-cursor.md
+dataset:
+  name: olist_order_payments_bootstrap
+  owner: Juan Pablo
+  producer: Olist
+  source_type: csv
+  source_file: dataset/olist_order_payments_dataset.csv
+  manifest: data/manifest.json
+  source_url: https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce
+  license: CC BY-NC-SA 4.0
+  grain: One row represents one payment-sequence line of one historical Olist order.
+  primary_key:
+    - order_id
+    - payment_sequential
+  currency_applicability: brl_only
+format:
+  encoding: utf-8
+  delimiter: ","
+  quote_character: '"'
+  header_required: true
+schema:
+  - name: order_id
+    source_position: 1
+    logical_type: string
+    required: true
+    pattern: "^[0-9a-f]{32}$"
+    semantics: References the Olist order this payment belongs to.
+  - name: payment_sequential
+    source_position: 2
+    logical_type: integer
+    required: true
+    minimum: 1
+    semantics: 1-based payment sequence number within one order (e.g. multiple vouchers); not a quantity.
+  - name: payment_type
+    source_position: 3
+    logical_type: string
+    required: true
+    allowed_values:
+      - credit_card
+      - boleto
+      - voucher
+      - debit_card
+      - not_defined
+  - name: payment_installments
+    source_position: 4
+    logical_type: integer
+    required: true
+    minimum: 0
+    semantics: Number of installments; 0 is observed in the source and preserved as-is.
+  - name: payment_value
+    source_position: 5
+    logical_type: decimal
+    required: true
+    minimum: 0
+    scale: 2
+    semantics: Amount paid for this payment line, BRL. Used for reconciliation diagnostics only, never as the GMV basis (ADR-005).
+bootstrap_mapping:
+  generated_fields:
+    source_created_at: configured bootstrap_loaded_at in UTC
+    source_updated_at: configured bootstrap_loaded_at in UTC
+quality_rules:
+  - id: OLIST-PAY-STRUCT-001
+    severity: blocking
+    rule: The header contains exactly the five contracted columns in contracted order.
+  - id: OLIST-PAY-KEY-001
+    severity: quarantine
+    rule: order_id is non-null and matches the required pattern.
+  - id: OLIST-PAY-KEY-002
+    severity: blocking
+    rule: Accepted (order_id, payment_sequential) pairs are unique within the bootstrap input.
+  - id: OLIST-PAY-SEQ-001
+    severity: quarantine
+    rule: payment_sequential is a positive integer.
+  - id: OLIST-PAY-TYPE-001
+    severity: quarantine
+    rule: payment_type belongs to the accepted domain.
+  - id: OLIST-PAY-MONEY-001
+    severity: quarantine
+    rule: payment_value is non-negative and has at most two decimal places.
+rejection_policy:
+  evaluated_count: accepted_count + rejected_count
+  maximum_rejected_rows: 10
+  maximum_rejected_rate: 0.01
+  on_threshold_exceeded: Fail bootstrap after durably preserving rejected rows.
+observed_profile:
+  source_file_sha256: 4f713964f2815dbbaa40b9488268c55aac3627bfce5aa96cf58d1f3616de3cc0
+  logical_rows: 103886
+  unique_payment_keys: 103886
+  distinct_orders: 99440
+  payment_sequential_range: [1, 29]
+  payment_type_counts:
+    credit_card: 76795
+    boleto: 19784
+    voucher: 5775
+    debit_card: 1529
+    not_defined: 3
+  payment_installments_range: [0, 24]
+  payment_value_range_brl: [0.00, 13664.08]
+  zero_value_rows: 9
+  orphan_orders: 0
+  orders_without_any_payment: 1
+classification:
+  pii: none
+  secrets: false
+freshness:
+  expectation: not_applicable_historical_snapshot
+retention:
+  source_file: Local input retained by the operator under the source license.
+  bootstrap_quarantine: Retain for the local project unless explicitly cleaned after evidence export.
+compatibility:
+  policy: exact_versioned_bootstrap_schema
+  breaking_changes:
+    - remove or rename a contracted column
+    - change a contracted logical type
+    - change the (order_id, payment_sequential) primary key semantics
+    - add a new required column
+    - add any uncontracted source column to this hash-pinned bootstrap version
+consumers:
+  - deterministic_order_payments_bootstrap
+known_limitations:
+  - The source contains no payment timestamp; only simulator-owned source_created_at/
+    source_updated_at exist for cursor purposes, unlike order_items' shipping_limit_date.
+  - payment_value frequently disagrees with order_items price+freight_value for reasons
+    unrelated to refunds (partial/installment payments, timing); see ADR-005. This
+    contract does not attempt to explain or correct that disagreement.
+  - This contract does not itself enforce that order_id exists in the orders bootstrap;
+    cross-entity referential checks are a Silver/intermediate-model concern.
+  - No refund, reversal, or chargeback signal exists in this dataset (ADR-005).
