@@ -7,11 +7,11 @@ A portfolio Data Engineering project designed to demonstrate reliable incrementa
 > **Start here:** [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md) — current state, invariants, open decisions, and task-specific reading map for any agent or contributor.
 
 **Phase:** Phase 1.1 closed (orders fulfillment); Phase 2A closed (order items + BRL
-commerce mart)
-**Design status:** Accepted on 2026-09-06; Phase 2A design (ADR-005/006/007) accepted on 2026-10-04
+commerce mart); Phase 2B closed (order payments + synthetic refunds)
+**Design status:** Accepted on 2026-09-06; Phase 2A/2B design (ADR-005/006/007) accepted on 2026-10-04
 **Implementation status:** Phase 1 accepted on 2026-09-07; Phase 1.1 closed locally on
-2026-09-08; Phase 2A closed locally on 2026-10-05
-**Implementation authorization:** Phase 1 authorized; Phase 2A authorized and closed
+2026-09-08; Phase 2A closed locally on 2026-10-05; Phase 2B closed locally on 2026-10-05
+**Implementation authorization:** Phase 1 authorized; Phase 2A and 2B authorized and closed
 
 Phase 1 delivers: Docker Compose with source + warehouse PostgreSQL, deterministic Olist
 bootstrap (99,441 orders), bounded `(source_updated_at, order_id)` extraction, Parquet
@@ -26,19 +26,19 @@ Phase 2A adds `order_items` ingestion with a composite cursor key (ADR-006), bot
 incremental and backfill extraction, and a BRL-only `gold.mart_daily_commerce` (GMV,
 freight, AOV; ADR-005), with the same failure-injection test coverage as orders and a
 blocking no-orphan-items invariant (GOLD-COM-ORPHAN-001). Phase 2B adds `order_payments`
-ingestion and a payment-reconciliation diagnostic model (`int_payment_reconciliation`,
-never a GMV input); the synthetic refund generator and `mart_daily_refunds` are still
-pending. Verified locally end-to-end against synthetic fixtures; not yet run against the
-full Olist dataset.
+ingestion with a payment-reconciliation diagnostic model (`int_payment_reconciliation`,
+never a GMV input) and a deterministic synthetic refund generator
+(`ecom.generate_refunds`, parallel to `ecom.mutate`) feeding `gold.mart_daily_refunds`
+(grained by refund date, never netted into `gmv_brl`). Verified locally end-to-end
+against synthetic fixtures; not yet run against the full Olist dataset.
 
 Phase 1 closure evidence is in [`docs/evidence/phase1-closure.md`](docs/evidence/phase1-closure.md).
 Phase 1.1 hardening evidence is in
 [`docs/evidence/phase1_1-closure.md`](docs/evidence/phase1_1-closure.md).
 Phase 2A closure evidence is in
 [`docs/evidence/phase2a-closure.md`](docs/evidence/phase2a-closure.md).
-Phase 2B payments-ingestion evidence (one of two Phase 2B deliverables; synthetic refunds
-remain open) is in
-[`docs/evidence/phase2b-payments-closure.md`](docs/evidence/phase2b-payments-closure.md).
+Phase 2B closure evidence is in
+[`docs/evidence/phase2b-closure.md`](docs/evidence/phase2b-closure.md).
 
 ## Business problem
 
@@ -130,7 +130,8 @@ Phase 1 contains no monetary metrics.
 | [`Phase 1 closure evidence`](docs/evidence/phase1-closure.md) | Acceptance results and layer reconciliation | Closed |
 | [`Phase 1.1 closure evidence`](docs/evidence/phase1_1-closure.md) | Design-alignment hardening results | Closed |
 | [`Phase 2A closure evidence`](docs/evidence/phase2a-closure.md) | Order items + BRL commerce results | Closed |
-| [`Phase 2B payments evidence`](docs/evidence/phase2b-payments-closure.md) | Order payments ingestion + reconciliation diagnostic | Payments slice closed; refunds open |
+| [`Phase 2B closure evidence`](docs/evidence/phase2b-closure.md) | Order payments ingestion + synthetic refunds results | Closed |
+| [`Phase 2B payments evidence (historical)`](docs/evidence/phase2b-payments-closure.md) | Intermediate payments-only closure, superseded above | Historical |
 | [`Progress report`](docs/evidence/progress-report.md) | Current phase, verification, and next-phase gates | Current |
 | [`Phase 1 implementation guide`](docs/phase1-implementation-guide.md) | Current code, decisions, evidence, and alignment status | Current |
 | [`Olist bootstrap contract`](contracts/source/olist_orders.v1.yaml) | Historical CSV boundary | Accepted |
@@ -141,14 +142,17 @@ Phase 1 contains no monetary metrics.
 | [`Commerce Gold contract`](contracts/gold/mart_daily_commerce.v1.yaml) | Certified BRL commerce product (Phase 2A) | Accepted |
 | [`Olist order_payments contract`](contracts/source/olist_order_payments.v1.yaml) | Historical CSV boundary (Phase 2B) | Accepted |
 | [`Operational order_payments contract`](contracts/source/operational_order_payments.v1.yaml) | Incremental PostgreSQL boundary (Phase 2B) | Accepted |
+| [`Operational order_refunds contract`](contracts/source/operational_order_refunds.v1.yaml) | Synthetic refund events boundary (Phase 2B) | Accepted |
+| [`Refunds Gold contract`](contracts/gold/mart_daily_refunds.v1.yaml) | Certified synthetic refund product (Phase 2B) | Accepted |
 
 ## Deliberate scope
 
-Phase 1 contains one complete orders vertical slice. Phase 2A adds one more
-(`order_items` + BRL GMV/AOV). Both deliberately exclude:
+Phase 1 contains one complete orders vertical slice. Phase 2A adds `order_items` + BRL
+GMV/AOV. Phase 2B adds `order_payments` + synthetic refunds. All deliberately exclude:
 
-- payments, customers, products, and sellers (Phase 2B/2C);
-- synthetic refunds and net-of-refund metrics (Phase 2B, ADR-005);
+- customers, products, and sellers (Phase 2C);
+- a true net-of-refund GMV/revenue figure (ADR-005: `mart_daily_commerce.gmv_brl` is
+  never netted against `mart_daily_refunds`; a reader computes any net view explicitly);
 - BRL->CLP conversion (Phase 2D, ADR-007 design accepted, not implemented);
 - Airflow;
 - dashboarding;
@@ -217,12 +221,34 @@ uv run python -m ecom.publish --product mart_daily_commerce --publication-id pha
 See [ADR-005](docs/adrs/ADR-005-commerce-metrics.md) for the GMV/AOV definitions and
 [ADR-006](docs/adrs/ADR-006-composite-entity-cursor.md) for the `order_items` cursor.
 
+## Phase 2B runbook (order payments + synthetic refunds)
+
+Run after the Phase 2A runbook above, against the same running stack:
+
+```bash
+uv run python -m ecom.bootstrap_payments --csv dataset/olist_order_payments_dataset.csv --attempt-id boot-pay-001
+uv run python -m ecom.extract_payments
+uv run python -m ecom.load_payments
+uv run python -m ecom.generate_refunds --ts 2018-10-22T00:00:00+00:00
+uv run python -m ecom.extract_refunds
+uv run python -m ecom.load_refunds
+cd dbt && PUBLICATION_ID=phase2b uv run --project .. dbt build --profiles-dir . && cd ..
+uv run python -m ecom.publish --product mart_daily_refunds --publication-id phase2b --test-results dbt/target/run_results.json --dbt-manifest dbt/target/manifest.json
+```
+
+`silver.int_payment_reconciliation` is a diagnostic-only model (never a GMV input).
+`ecom.generate_refunds` is entirely synthetic (ADR-005) — Olist has no refund signal; by
+default it refunds the lexicographically first unrefunded payment, or target one
+explicitly with `--order-id`/`--payment-sequential`. `gold.mart_daily_refunds` is grained
+by refund date and is never netted into `mart_daily_commerce.gmv_brl`.
+
 ## Continuous integration
 
 Every pull request and push to `main` runs
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml): Ruff lint and format checks, unit
-tests, then a full pipeline cycle (bootstrap, extract, load, dbt build, publish both Gold
-products, integration tests — including the `order_items` vertical slice — and final
+tests, then a full pipeline cycle (bootstrap, extract, load, dbt build, publish all three
+Gold products, integration tests — including the `order_items`/`order_payments`/
+`order_refunds` vertical slices — and final
 reconciliation) against two ephemeral PostgreSQL containers using the repository's
 `compose.yaml`. CI bootstraps from small synthetic fixtures
 (`tests/fixtures/orders_small.csv`, `tests/fixtures/order_items_small.csv`), never the
