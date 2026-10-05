@@ -6,11 +6,12 @@ A portfolio Data Engineering project designed to demonstrate reliable incrementa
 
 > **Start here:** [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md) — current state, invariants, open decisions, and task-specific reading map for any agent or contributor.
 
-**Phase:** Phase 1.1 closed (orders fulfillment); Phase 2A implemented locally (order
-items + BRL commerce mart), not yet closed
+**Phase:** Phase 1.1 closed (orders fulfillment); Phase 2A closed (order items + BRL
+commerce mart)
 **Design status:** Accepted on 2026-09-06; Phase 2A design (ADR-005/006/007) accepted on 2026-10-04
-**Implementation status:** Phase 1 accepted on 2026-09-07; Phase 1.1 closed locally on 2026-09-08
-**Implementation authorization:** Phase 1 authorized; Phase 2A implementation underway
+**Implementation status:** Phase 1 accepted on 2026-09-07; Phase 1.1 closed locally on
+2026-09-08; Phase 2A closed locally on 2026-10-05
+**Implementation authorization:** Phase 1 authorized; Phase 2A authorized and closed
 
 Phase 1 delivers: Docker Compose with source + warehouse PostgreSQL, deterministic Olist
 bootstrap (99,441 orders), bounded `(source_updated_at, order_id)` extraction, Parquet
@@ -21,14 +22,17 @@ and `gold.mart_daily_order_fulfillment` (one row per Chilean purchase-date cohor
 Verified reconciliation: source 99,442 = silver 99,442 = gold 99,442
 (99,441 Olist + 1 deterministic demo mutation).
 
-Phase 2A adds `order_items` ingestion with a composite cursor key (ADR-006) and a BRL-only
-`gold.mart_daily_commerce` (GMV, freight, AOV; ADR-005). Verified locally end-to-end
-against synthetic fixtures; not yet run against the full Olist dataset or given a
-closure-evidence document. See [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md) §7a.
+Phase 2A adds `order_items` ingestion with a composite cursor key (ADR-006), both
+incremental and backfill extraction, and a BRL-only `gold.mart_daily_commerce` (GMV,
+freight, AOV; ADR-005), with the same failure-injection test coverage as orders and a
+blocking no-orphan-items invariant (GOLD-COM-ORPHAN-001). Verified locally end-to-end
+against synthetic fixtures; not yet run against the full Olist dataset.
 
 Phase 1 closure evidence is in [`docs/evidence/phase1-closure.md`](docs/evidence/phase1-closure.md).
 Phase 1.1 hardening evidence is in
 [`docs/evidence/phase1_1-closure.md`](docs/evidence/phase1_1-closure.md).
+Phase 2A closure evidence is in
+[`docs/evidence/phase2a-closure.md`](docs/evidence/phase2a-closure.md).
 
 ## Business problem
 
@@ -119,6 +123,7 @@ Phase 1 contains no monetary metrics.
 | [`Test matrix`](docs/testing/phase1-test-matrix.md) | Required Phase 1 verification | Accepted |
 | [`Phase 1 closure evidence`](docs/evidence/phase1-closure.md) | Acceptance results and layer reconciliation | Closed |
 | [`Phase 1.1 closure evidence`](docs/evidence/phase1_1-closure.md) | Design-alignment hardening results | Closed |
+| [`Phase 2A closure evidence`](docs/evidence/phase2a-closure.md) | Order items + BRL commerce results | Closed |
 | [`Progress report`](docs/evidence/progress-report.md) | Current phase, verification, and next-phase gates | Current |
 | [`Phase 1 implementation guide`](docs/phase1-implementation-guide.md) | Current code, decisions, evidence, and alignment status | Current |
 | [`Olist bootstrap contract`](contracts/source/olist_orders.v1.yaml) | Historical CSV boundary | Accepted |

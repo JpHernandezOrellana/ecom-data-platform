@@ -1312,9 +1312,10 @@ cursor pattern for multi-row-per-order entities is accepted in ADR-006. The BRL-
 source and conversion policy design is accepted in ADR-007 (implementation deferred to
 Phase 2D). Sub-phases, in order:
 
-- **2A — order items + BRL commerce mart:** `order_items` contract, bootstrap, incremental
-  extraction (ADR-006 cursor), Silver, `int_order_commerce`, `mart_daily_commerce` (BRL
-  only, ADR-005 metrics).
+- **2A — order items + BRL commerce mart (closed 2026-10-05):** `order_items` contract,
+  bootstrap, incremental and backfill extraction (ADR-006 cursor), Silver,
+  `int_order_commerce`, `mart_daily_commerce` (BRL only, ADR-005 metrics). Evidence:
+  `docs/evidence/phase2a-closure.md`.
 - **2B — payments + synthetic refunds:** `order_payments` contract and ingestion; payment
   reconciliation diagnostics; synthetic refund event generator and `mart_daily_refunds`
   (ADR-005).

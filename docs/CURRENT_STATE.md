@@ -1,7 +1,7 @@
 # Current Project State
 
-**Last updated:** 2026-10-05 (failure-injection tests added)
-**Current phase:** Phase 2A implemented locally (order items + BRL commerce mart), not yet closed/evidenced
+**Last updated:** 2026-10-05
+**Current phase:** Phase 2A closed (order items + BRL commerce mart)
 **Next phase:** Phase 2B (payments + synthetic refunds)
 
 This document is the required entry point for any agent or contributor before touching
@@ -44,7 +44,7 @@ Olist orders CSV -> source PostgreSQL -> bounded incremental extraction (cursor)
 - Candidate retention as an independent command (`src/ecom/retention.py`).
 - dbt tests asserting Gold contract rules and Silver-to-Gold reconciliation.
 
-### Order items + BRL commerce mart (Phase 2A, implemented, not yet closed)
+### Order items + BRL commerce mart (Phase 2A, closed)
 
 ```text
 Olist order_items CSV -> source.order_items (composite cursor, ADR-006)
@@ -68,20 +68,27 @@ Olist order_items CSV -> source.order_items (composite cursor, ADR-006)
   a small `PRODUCTS` registry (two products: `mart_daily_order_fulfillment`,
   `mart_daily_commerce`); default remains `mart_daily_order_fulfillment` for backward
   compatibility.
+- `extract_items.py` supports both incremental and `--run-mode backfill` extraction
+  (ADR-002/ADR-006 bounded, auditable backfill requests, never advancing the normal
+  checkpoint).
 - dbt: `silver.stg_order_items`, `silver.int_order_commerce` (one row per `order_id`,
   items pre-aggregated), `gold_candidate.mart_daily_commerce__<id>` ->
-  `gold.mart_daily_commerce`, with `assert_commerce_mart_metric_rules` and
-  `assert_commerce_mart_reconciles_to_silver` dbt tests mirroring ADR-004's pattern.
-- Verified locally end-to-end (bootstrap -> extract -> load -> dbt build -> publish,
-  twice, baseline and final, matching the CI shape) with a 4-row fixture
-  (`tests/fixtures/order_items_small.csv`): GMV correctly excludes freight and excludes
-  the `canceled` order's item value (see worked example in ADR-005).
-- Known Phase 2A limitation (documented in the Gold contract): an `order_item` referencing
-  an `order_id` absent from `stg_orders` is excluded from `int_order_commerce` via inner
-  join, not quarantined — acceptable for now, not yet covered by a dedicated test.
-- Not yet done: no dedicated closure evidence doc for Phase 2A (unlike `phase1_1-closure.md`);
-  `mutate_items.py`-equivalent for exercising incremental updates/backfill on `order_items`
-  does not exist yet (only initial bootstrap + single extraction have been exercised).
+  `gold.mart_daily_commerce`, with `assert_commerce_mart_metric_rules`,
+  `assert_commerce_mart_reconciles_to_silver`, and `assert_no_orphan_order_items`
+  (GOLD-COM-ORPHAN-001 — an order_item whose order_id is absent from `stg_orders` fails
+  the build rather than being silently excluded, per `AGENTS.md` §6.8).
+- Failure-injection tests for `order_items` (`tests/test_phase2a_items.py`): crash-after-
+  publish recovery, checkpoint CAS conflict, bounded backfill, and breaking-operational-
+  schema fail-closed — same coverage categories as the `orders` suite.
+- Verified locally end-to-end (exact CI command sequence, fresh Docker volume): unit
+  tests, full integration suite (40 tests total across the repo), dbt build baseline+final
+  (23/23 each), both products published at baseline and final, final reconciliation
+  passing. GMV spot-check: excludes freight, excludes the `canceled` order's item value
+  (worked example in ADR-005 and `docs/evidence/phase2a-closure.md`).
+- Closure evidence: [`docs/evidence/phase2a-closure.md`](evidence/phase2a-closure.md).
+- Remaining Phase 2A limitations (non-blocking, carried forward): no `mutate_items`
+  equivalent CLI (incremental-update demos use direct test-only inserts); backfill mode
+  untested against equal-timestamp ties at scale.
 
 ## 3. Latest verification (Phase 1.1 closure, 2026-09-08)
 
@@ -196,35 +203,27 @@ narrowly scoped task.
   SII Dólar Observado (CLP/USD) via USD; 7-day max carry-forward for missing days,
   fails closed beyond that; integer half-up rounding for CLP. Implementation deferred to
   Phase 2D — BRL ships first.
-- Data contracts for each new entity, starting with `order_items`, remain to be written
-  (next concrete step, §7a).
+- Data contracts for `order_items` are accepted and implemented (§2).
 
 Any future change to ingestion pattern, checkpoint semantics, storage format, warehouse
 engine, orchestration, Gold grain, or metric semantics beyond what these three ADRs cover
 requires its own new/updated ADR before implementation (`AGENTS.md` §23).
 
-## 7a. Phase 2A status (order items + BRL commerce mart)
+## 7a. Phase 2A status (order items + BRL commerce mart) — closed 2026-10-05
 
-Implemented and locally verified (§2); not yet "closed" in the Phase 1.1 sense (no
-closure-evidence doc yet). Crash recovery, checkpoint CAS conflict, and breaking-schema
-fail-closed are now covered for `order_items` (`tests/test_phase2a_items.py`), mirroring
-`tests/test_integration.py`'s coverage for `orders`. Remaining work before calling 2A
-done:
+Implemented, tested, and closed. Closure evidence:
+[`docs/evidence/phase2a-closure.md`](evidence/phase2a-closure.md). Non-blocking items
+carried forward into later phases:
 
-1. Backfill mode for `order_items` (`extract_items.py` only supports incremental
-   extraction today).
-2. A quarantine/test for an `order_item` whose `order_id` is absent from `stg_orders`
-   (currently silently excluded via inner join — documented but untested).
-3. A closure-evidence doc (`docs/evidence/phase2a-closure.md`) once the above lands and a
-   full clean run is captured.
-4. Decide whether `order_items` needs its own `mutate_items`-equivalent for demonstrating
-   incremental updates from a bootstrap-like baseline (the new failure-injection tests
-   insert synthetic rows directly rather than going through a `mutate`-style CLI).
+1. No `mutate_items`-equivalent CLI exists; incremental-update demonstrations for items
+   use direct test-only inserts rather than a reusable command.
+2. Backfill mode for `order_items` has not been exercised against equal-timestamp ties
+   at scale (the orders bootstrap deliberately creates many; the items fixture does not).
 
 ## 8. Recommended next slice
 
-Close out Phase 2A per §7a, then Phase 2B: `order_payments` contract + ingestion, payment
-reconciliation diagnostics, and the synthetic refund event generator +
+Phase 2B: `order_payments` contract + ingestion, payment reconciliation diagnostics
+against `price + freight_value`, and the synthetic refund event generator feeding
 `mart_daily_refunds` (ADR-005).
 
 ## 9. Keeping this file honest
