@@ -33,6 +33,11 @@ PRODUCTS: dict[str, tuple[str, ...]] = {
         "canceled_item_value_brl",
         "unavailable_item_value_brl",
     ),
+    "mart_daily_refunds": (
+        "reporting_date",
+        "refund_count",
+        "refunded_amount_brl",
+    ),
 }
 
 

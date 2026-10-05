@@ -1,0 +1,87 @@
+contract_version: 1.0.0
+metric_version: 1.0.0
+status: accepted
+accepted_by: Juan Pablo
+accepted_date: 2026-10-05
+related_sdd: SDD.md
+related_adrs:
+  - docs/adrs/ADR-005-commerce-metrics.md
+data_product:
+  name: mart_daily_refunds
+  owner: Juan Pablo
+  producer: phase_2b_dbt_project
+  relation: gold.mart_daily_refunds
+  grain: One row represents one refund-date cohort (date of refunded_at, America/Santiago).
+  purpose: >
+    Certified BRL refund activity, grained by the date the refund occurred -- not by the
+    original order's purchase date. Built entirely from synthetic demo refund events
+    (ecom.generate_refunds); Olist contains no refund signal (ADR-005).
+  primary_key:
+    - reporting_date
+  currency_applicability: brl_only
+  synthetic: true
+schema:
+  - name: reporting_date
+    postgresql_type: date
+    logical_type: date
+    required: true
+    semantics: Date of refunded_at, converted to America/Santiago.
+  - name: refund_count
+    postgresql_type: bigint
+    logical_type: integer
+    required: true
+    minimum: 0
+  - name: refunded_amount_brl
+    postgresql_type: numeric(18,2)
+    logical_type: decimal
+    required: true
+    minimum: 0
+metrics:
+  canonical_glossary: docs/adrs/ADR-005-commerce-metrics.md
+  included:
+    - refund_count
+    - refunded_amount_brl
+quality_rules:
+  - id: GOLD-REF-GRAIN-001
+    severity: blocking
+    rule: reporting_date is unique and non-null.
+  - id: GOLD-REF-COUNT-001
+    severity: blocking
+    rule: refund_count and refunded_amount_brl are non-negative.
+  - id: GOLD-REF-RECON-001
+    severity: blocking
+    rule: refunded_amount_brl reconciles to sum(refunded_amount) over stg_order_refunds grouped by reporting_date.
+freshness:
+  cadence: daily_capable_and_manually_triggerable
+  healthy_run_target_minutes: 15
+publication:
+  candidate_schema: gold_candidate
+  candidate_relation_pattern: mart_daily_refunds__<publication_id>
+  certified_relation: gold.mart_daily_refunds
+  certified_relation_type: view
+  promotion: Replace the stable view and record publication metadata in one warehouse transaction after all required tests pass.
+  failed_candidate_behavior: Preserve the previously certified view target.
+  retention:
+    successful_candidates: 5
+    failed_candidate_days: 7
+classification:
+  pii: none
+  secrets: false
+retention:
+  certified_product: Retain the current certified view and its referenced candidate.
+compatibility:
+  policy: backward
+  breaking_changes:
+    - change grain or reporting date role
+    - change a metric formula
+    - remove or rename a contracted field
+    - net this mart's figures into mart_daily_commerce.gmv_brl
+consumers:
+  - analyst
+  - portfolio_reviewer
+known_limitations:
+  - Entirely synthetic demo data (ADR-005); never claimed as observed Olist history.
+  - Grained by refund date, not purchase date; never merge with mart_daily_commerce's
+    cohort without an explicit join, since the two marts use different date roles.
+  - mart_daily_commerce.gmv_brl is never reduced by this mart's figures. A net view
+    (net_payment_value_brl) is computed explicitly by the reader from both marts.

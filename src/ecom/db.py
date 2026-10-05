@@ -17,6 +17,12 @@ _PHASE_2B_WAREHOUSE_MIGRATION = (
 _PHASE_2B_SOURCE_MIGRATION = (
     Path(__file__).resolve().parents[2] / "sql/source/003_order_payments.sql"
 )
+_PHASE_2B_REFUNDS_WAREHOUSE_MIGRATION = (
+    Path(__file__).resolve().parents[2] / "sql/warehouse/006_order_refunds.sql"
+)
+_PHASE_2B_REFUNDS_SOURCE_MIGRATION = (
+    Path(__file__).resolve().parents[2] / "sql/source/004_order_refunds.sql"
+)
 
 
 def connect(dsn: str, *, retries: int = 0, base_delay_s: float = 1.0) -> psycopg.Connection:
@@ -78,4 +84,18 @@ def ensure_phase_2b_source_schema(conn: psycopg.Connection) -> None:
     """Apply the idempotent source.order_payments migration (Phase 2B)."""
     with conn.cursor() as cur:
         cur.execute(_PHASE_2B_SOURCE_MIGRATION.read_text())
+    conn.commit()
+
+
+def ensure_phase_2b_refunds_warehouse_schema(conn: psycopg.Connection) -> None:
+    """Apply the idempotent raw_stage.order_refunds migration (Phase 2B)."""
+    with conn.cursor() as cur:
+        cur.execute(_PHASE_2B_REFUNDS_WAREHOUSE_MIGRATION.read_text())
+    conn.commit()
+
+
+def ensure_phase_2b_refunds_source_schema(conn: psycopg.Connection) -> None:
+    """Apply the idempotent source.order_refunds migration (Phase 2B)."""
+    with conn.cursor() as cur:
+        cur.execute(_PHASE_2B_REFUNDS_SOURCE_MIGRATION.read_text())
     conn.commit()

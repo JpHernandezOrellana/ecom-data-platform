@@ -47,3 +47,19 @@ models:
     columns:
       - name: order_id
         tests: [not_null, unique]
+  - name: stg_order_refunds
+    description: >
+      Latest deterministic source version of one refund_id. Entirely synthetic demo data
+      (ADR-005); never claimed as observed Olist history.
+    columns:
+      - name: refund_id
+        tests: [not_null, unique]
+      - name: order_id
+        tests: [not_null]
+  - name: mart_daily_refunds
+    description: >
+      Certified synthetic refund activity by refund-date cohort (ADR-005). Never netted
+      into mart_daily_commerce.gmv_brl.
+    columns:
+      - name: reporting_date
+        tests: [not_null, unique]

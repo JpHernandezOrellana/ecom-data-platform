@@ -97,6 +97,11 @@ jobs:
             --publication-id ci_baseline \
             --test-results dbt/target/run_results.json \
             --dbt-manifest dbt/target/manifest.json
+          uv run python -m ecom.publish \
+            --product mart_daily_refunds \
+            --publication-id ci_baseline \
+            --test-results dbt/target/run_results.json \
+            --dbt-manifest dbt/target/manifest.json
 
       - name: Integration tests (excluding final reconciliation)
         run: |
@@ -119,6 +124,11 @@ jobs:
             --dbt-manifest dbt/target/manifest.json
           uv run python -m ecom.publish \
             --product mart_daily_commerce \
+            --publication-id ci_final \
+            --test-results dbt/target/run_results.json \
+            --dbt-manifest dbt/target/manifest.json
+          uv run python -m ecom.publish \
+            --product mart_daily_refunds \
             --publication-id ci_final \
             --test-results dbt/target/run_results.json \
             --dbt-manifest dbt/target/manifest.json
