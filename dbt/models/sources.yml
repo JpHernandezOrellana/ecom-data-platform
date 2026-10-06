@@ -15,3 +15,5 @@ sources:
         identifier: products
       - name: raw_sellers
         identifier: sellers
+      - name: raw_customers
+        identifier: customers

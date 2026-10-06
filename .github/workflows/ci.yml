@@ -66,11 +66,15 @@ jobs:
       - name: Start local Postgres stack
         run: docker compose up -d --wait
 
-      - name: Bootstrap synthetic fixture
+      - name: Bootstrap synthetic fixtures
         run: |
           uv run python -m ecom.bootstrap \
             --csv tests/fixtures/orders_small.csv \
             --attempt-id ci-bootstrap \
+            --allow-unverified-input
+          uv run python -m ecom.bootstrap_customers \
+            --csv tests/fixtures/customers_small.csv \
+            --attempt-id ci-bootstrap-customers \
             --allow-unverified-input
 
       - name: Create least-privilege source reader
@@ -81,6 +85,11 @@ jobs:
 
       - name: Initial load
         run: uv run python -m ecom.load
+
+      - name: Extract and load customers dimension
+        run: |
+          uv run python -m ecom.extract_customers
+          uv run python -m ecom.load_customers
 
       - name: dbt seed (static reference data)
         working-directory: dbt

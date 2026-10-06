@@ -35,6 +35,12 @@ _PHASE_2C_SELLERS_WAREHOUSE_MIGRATION = (
 _PHASE_2C_SELLERS_SOURCE_MIGRATION = (
     Path(__file__).resolve().parents[2] / "sql/source/006_sellers.sql"
 )
+_PHASE_2C_CUSTOMERS_WAREHOUSE_MIGRATION = (
+    Path(__file__).resolve().parents[2] / "sql/warehouse/009_customers.sql"
+)
+_PHASE_2C_CUSTOMERS_SOURCE_MIGRATION = (
+    Path(__file__).resolve().parents[2] / "sql/source/007_customers.sql"
+)
 
 
 def connect(dsn: str, *, retries: int = 0, base_delay_s: float = 1.0) -> psycopg.Connection:
@@ -138,4 +144,18 @@ def ensure_phase_2c_sellers_source_schema(conn: psycopg.Connection) -> None:
     """Apply the idempotent source.sellers migration (Phase 2C)."""
     with conn.cursor() as cur:
         cur.execute(_PHASE_2C_SELLERS_SOURCE_MIGRATION.read_text())
+    conn.commit()
+
+
+def ensure_phase_2c_customers_warehouse_schema(conn: psycopg.Connection) -> None:
+    """Apply the idempotent raw_stage.customers migration (Phase 2C)."""
+    with conn.cursor() as cur:
+        cur.execute(_PHASE_2C_CUSTOMERS_WAREHOUSE_MIGRATION.read_text())
+    conn.commit()
+
+
+def ensure_phase_2c_customers_source_schema(conn: psycopg.Connection) -> None:
+    """Apply the idempotent source.customers migration (Phase 2C)."""
+    with conn.cursor() as cur:
+        cur.execute(_PHASE_2C_CUSTOMERS_SOURCE_MIGRATION.read_text())
     conn.commit()

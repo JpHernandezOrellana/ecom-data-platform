@@ -93,3 +93,14 @@ models:
         tests: [not_null]
       - name: product_category_name
         tests: [not_null]
+  - name: stg_customers
+    description: >
+      Latest deterministic source version of one customer_id. customer_id is the
+      order-associated customer row, not the repeat-customer identity
+      (customer_unique_id, SDD §9.4). No new-vs-returning-customer metric is defined here
+      (deferred, ADR-008 "Deferred").
+    columns:
+      - name: customer_id
+        tests: [not_null, unique]
+      - name: customer_unique_id
+        tests: [not_null]

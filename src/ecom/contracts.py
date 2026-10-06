@@ -24,6 +24,10 @@ PRODUCT_OPERATIONAL_CONTRACT_PATH = (
 )
 SELLER_BOOTSTRAP_CONTRACT_PATH = REPOSITORY_ROOT / "contracts/source/olist_sellers.v1.yaml"
 SELLER_OPERATIONAL_CONTRACT_PATH = REPOSITORY_ROOT / "contracts/source/operational_sellers.v1.yaml"
+CUSTOMER_BOOTSTRAP_CONTRACT_PATH = REPOSITORY_ROOT / "contracts/source/olist_customers.v1.yaml"
+CUSTOMER_OPERATIONAL_CONTRACT_PATH = (
+    REPOSITORY_ROOT / "contracts/source/operational_customers.v1.yaml"
+)
 
 
 def load_contract(path: str | Path) -> dict:

@@ -1,0 +1,107 @@
+contract_version: 1.0.0
+status: accepted
+accepted_by: Juan Pablo
+accepted_date: 2026-10-05
+related_sdd: SDD.md
+dataset:
+  name: olist_customers_bootstrap
+  owner: Juan Pablo
+  producer: Olist
+  source_type: csv
+  source_file: dataset/olist_customers_dataset.csv
+  manifest: data/manifest.json
+  source_url: https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce
+  license: CC BY-NC-SA 4.0
+  grain: One row represents one order-associated customer record.
+  primary_key:
+    - customer_id
+  currency_applicability: not_applicable_no_monetary_fields
+format:
+  encoding: utf-8
+  delimiter: ","
+  quote_character: '"'
+  header_required: true
+schema:
+  - name: customer_id
+    source_position: 1
+    logical_type: string
+    required: true
+    pattern: "^[0-9a-f]{32}$"
+    semantics: >
+      Identifies the order-associated customer row (SDD §9.4). One-to-one with orders in
+      the full Olist dataset (99,441 distinct customer_id for 99,441 orders) — this is not
+      the repeat-customer identity.
+  - name: customer_unique_id
+    source_position: 2
+    logical_type: string
+    required: true
+    pattern: "^[0-9a-f]{32}$"
+    semantics: >
+      Represents repeat-customer identity (SDD §9.4). Not unique: 2,997 values repeat
+      across multiple customer_id/order rows in the full Olist dataset (up to 17 times).
+      This slice ingests and exposes this column; it does not define or certify any
+      new-vs-returning-customer metric (deferred, SDD §37, ADR-008 "Deferred").
+  - name: customer_zip_code_prefix
+    source_position: 3
+    logical_type: string
+    required: true
+    semantics: Preserved as a string, including leading zeros (SDD §9.3).
+  - name: customer_city
+    source_position: 4
+    logical_type: string
+    required: true
+  - name: customer_state
+    source_position: 5
+    logical_type: string
+    required: true
+bootstrap_mapping:
+  generated_fields:
+    source_created_at: configured bootstrap_loaded_at in UTC
+    source_updated_at: configured bootstrap_loaded_at in UTC
+quality_rules:
+  - id: OLIST-CUST-STRUCT-001
+    severity: blocking
+    rule: The header contains exactly the five contracted columns in contracted order.
+  - id: OLIST-CUST-KEY-001
+    severity: quarantine
+    rule: customer_id and customer_unique_id are non-null and match the required pattern.
+  - id: OLIST-CUST-KEY-002
+    severity: blocking
+    rule: Accepted customer_id values are unique within the bootstrap input.
+rejection_policy:
+  evaluated_count: accepted_count + rejected_count
+  maximum_rejected_rows: 10
+  maximum_rejected_rate: 0.01
+  on_threshold_exceeded: Fail bootstrap after durably preserving rejected rows.
+observed_profile:
+  source_file_sha256: 983a422239e1712ded753b3bf9ecf47dc73f144d306029dcfa99e70a226883d2
+  logical_rows: 99441
+  unique_customer_ids: 99441
+  unique_customer_unique_ids: 96096
+  repeat_customer_unique_ids: 2997
+  max_orders_per_customer_unique_id: 17
+classification:
+  pii: pseudonymous
+  pii_fields:
+    - customer_id
+    - customer_unique_id
+  secrets: false
+freshness:
+  expectation: not_applicable_historical_snapshot
+retention:
+  source_file: Local input retained by the operator under the source license.
+  bootstrap_quarantine: Retain for the local project unless explicitly cleaned after evidence export.
+compatibility:
+  policy: exact_versioned_bootstrap_schema
+  breaking_changes:
+    - remove or rename a contracted column
+    - change a contracted logical type
+    - change customer_id or customer_unique_id semantics
+    - add a new required column
+consumers:
+  - deterministic_customers_bootstrap
+known_limitations:
+  - No business timestamp exists in this source; source_created_at/source_updated_at are
+    entirely simulator-owned, same pattern as products/sellers (ADR-008).
+  - This slice does not define a new-vs-returning-customer metric or any customer-history
+    strategy; that remains deferred pending its own ADR (SDD §37).
