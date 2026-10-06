@@ -3,7 +3,7 @@ ecom:
   outputs:
     dev:
       type: postgres
-      host: localhost
+      host: "{{ env_var('WAREHOUSE_HOST', 'localhost') }}"
       user: "{{ env_var('WAREHOUSE_USER', 'warehouse_app') }}"
       pass: "{{ env_var('WAREHOUSE_PASSWORD', 'warehouse_pw_change_me') }}"
       dbname: "{{ env_var('WAREHOUSE_DB', 'ecom_warehouse') }}"

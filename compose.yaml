@@ -35,6 +35,42 @@ services:
       timeout: 5s
       retries: 10
 
+  airflow:
+    build: ./docker/airflow
+    container_name: ecom-airflow
+    depends_on:
+      source-postgres:
+        condition: service_healthy
+      warehouse-postgres:
+        condition: service_healthy
+    environment:
+      AIRFLOW__CORE__EXECUTOR: SequentialExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: sqlite:////opt/airflow/airflow.db
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__DAGS_FOLDER: /opt/ecom_orders/dags
+      # Container-network DSNs (service-name:5432), distinct from the host-facing
+      # DSNs in .env which use localhost + the mapped SOURCE_PORT/WAREHOUSE_PORT.
+      SOURCE_DSN: postgresql://${SOURCE_USER:-source_app}:${SOURCE_PASSWORD:-source_pw}@source-postgres:5432/${SOURCE_DB:-ecom_source}
+      SOURCE_READER_DSN: postgresql://${SOURCE_READER_USER:-source_reader}:${SOURCE_READER_PASSWORD:-source_reader_pw}@source-postgres:5432/${SOURCE_DB:-ecom_source}
+      WAREHOUSE_DSN: postgresql://${WAREHOUSE_USER:-warehouse_app}:${WAREHOUSE_PASSWORD:-warehouse_pw}@warehouse-postgres:5432/${WAREHOUSE_DB:-ecom_warehouse}
+      # dbt/profiles.yml builds its own connection from discrete env vars, not WAREHOUSE_DSN.
+      WAREHOUSE_HOST: warehouse-postgres
+      WAREHOUSE_USER: ${WAREHOUSE_USER:-warehouse_app}
+      WAREHOUSE_PASSWORD: ${WAREHOUSE_PASSWORD:-warehouse_pw}
+      WAREHOUSE_DB: ${WAREHOUSE_DB:-ecom_warehouse}
+      WAREHOUSE_PORT: "5432"
+      DATA_DIR: /opt/ecom_orders/data
+      BATCH_PAGE_SIZE: ${BATCH_PAGE_SIZE:-5000}
+      BOOTSTRAP_LOADED_AT: ${BOOTSTRAP_LOADED_AT:-2018-10-20T00:00:00+00:00}
+    volumes:
+      - ./:/opt/ecom_orders
+      - airflow_home:/opt/airflow
+    ports:
+      - "8081:8080"
+    command: >
+      bash -c "cd /opt/ecom_orders && uv sync --frozen && airflow standalone"
+
 volumes:
   source_pgdata:
   warehouse_pgdata:
+  airflow_home:
