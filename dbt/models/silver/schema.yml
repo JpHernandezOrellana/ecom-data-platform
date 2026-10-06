@@ -63,3 +63,33 @@ models:
     columns:
       - name: reporting_date
         tests: [not_null, unique]
+  - name: stg_products
+    description: >
+      Latest deterministic source version of one product_id. A null category is bucketed
+      as the literal "unknown" (ADR-008), never dropped.
+    columns:
+      - name: product_id
+        tests: [not_null, unique]
+  - name: stg_sellers
+    description: Latest deterministic source version of one seller_id.
+    columns:
+      - name: seller_id
+        tests: [not_null, unique]
+  - name: int_order_items_category
+    description: >
+      One row per order_item carrying its product's category at item grain (ADR-008).
+    columns:
+      - name: order_id
+        tests: [not_null]
+      - name: order_item_id
+        tests: [not_null]
+  - name: mart_daily_category_commerce
+    description: >
+      Certified BRL commerce value by Chilean purchase-date cohort and product category,
+      at item grain (ADR-008). sum(category_gmv_brl) by date reconciles to
+      mart_daily_commerce.gmv_brl.
+    columns:
+      - name: reporting_date
+        tests: [not_null]
+      - name: product_category_name
+        tests: [not_null]

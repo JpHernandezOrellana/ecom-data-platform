@@ -1,0 +1,112 @@
+contract_version: 1.0.0
+status: accepted
+accepted_by: Juan Pablo
+accepted_date: 2026-10-05
+related_sdd: SDD.md
+dataset:
+  name: olist_products_bootstrap
+  owner: Juan Pablo
+  producer: Olist
+  source_type: csv
+  source_file: dataset/olist_products_dataset.csv
+  manifest: data/manifest.json
+  source_url: https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce
+  license: CC BY-NC-SA 4.0
+  grain: One row represents one historical Olist product.
+  primary_key:
+    - product_id
+  currency_applicability: not_applicable_no_monetary_fields
+format:
+  encoding: utf-8
+  delimiter: ","
+  quote_character: '"'
+  header_required: true
+schema:
+  - name: product_id
+    source_position: 1
+    logical_type: string
+    required: true
+    pattern: "^[0-9a-f]{32}$"
+    semantics: Stable Olist product identifier.
+  - name: product_category_name
+    source_position: 2
+    logical_type: string
+    required: false
+    semantics: >
+      Portuguese category name. Null for 610 products in the observed full dataset; this
+      is a known source characteristic, never a quarantine violation (ADR-008).
+  - name: product_name_lenght
+    source_position: 3
+    logical_type: integer
+    required: false
+    semantics: Source column name intentionally preserves the misspelling "lenght".
+  - name: product_description_lenght
+    source_position: 4
+    logical_type: integer
+    required: false
+  - name: product_photos_qty
+    source_position: 5
+    logical_type: integer
+    required: false
+  - name: product_weight_g
+    source_position: 6
+    logical_type: integer
+    required: false
+  - name: product_length_cm
+    source_position: 7
+    logical_type: integer
+    required: false
+  - name: product_height_cm
+    source_position: 8
+    logical_type: integer
+    required: false
+  - name: product_width_cm
+    source_position: 9
+    logical_type: integer
+    required: false
+bootstrap_mapping:
+  generated_fields:
+    source_created_at: configured bootstrap_loaded_at in UTC
+    source_updated_at: configured bootstrap_loaded_at in UTC
+quality_rules:
+  - id: OLIST-PROD-STRUCT-001
+    severity: blocking
+    rule: The header contains exactly the nine contracted columns in contracted order.
+  - id: OLIST-PROD-KEY-001
+    severity: quarantine
+    rule: product_id is non-null and matches the required pattern.
+  - id: OLIST-PROD-KEY-002
+    severity: blocking
+    rule: Accepted product_id values are unique within the bootstrap input.
+rejection_policy:
+  evaluated_count: accepted_count + rejected_count
+  maximum_rejected_rows: 10
+  maximum_rejected_rate: 0.01
+  on_threshold_exceeded: Fail bootstrap after durably preserving rejected rows.
+observed_profile:
+  source_file_sha256: 3e6569628a17fbc75fd206ee357b59e20364b9afa90f5b6cd5b4d624c58aa9cc
+  logical_rows: 32951
+  unique_product_ids: 32951
+  null_product_category_name: 610
+classification:
+  pii: none
+  secrets: false
+freshness:
+  expectation: not_applicable_historical_snapshot
+retention:
+  source_file: Local input retained by the operator under the source license.
+  bootstrap_quarantine: Retain for the local project unless explicitly cleaned after evidence export.
+compatibility:
+  policy: exact_versioned_bootstrap_schema
+  breaking_changes:
+    - remove or rename a contracted column
+    - change a contracted logical type
+    - change product_id semantics
+    - add a new required column
+consumers:
+  - deterministic_products_bootstrap
+known_limitations:
+  - No business timestamp exists in this source; source_created_at/source_updated_at are
+    entirely simulator-owned (ADR-008), same pattern as order_payments.
+  - product_category_name is null for a known subset of products; downstream models bucket
+    this as the literal category "unknown" rather than dropping the row.

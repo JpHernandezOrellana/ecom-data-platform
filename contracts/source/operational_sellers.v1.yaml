@@ -1,0 +1,92 @@
+contract_version: 1.0.0
+status: accepted
+accepted_by: Juan Pablo
+accepted_date: 2026-10-05
+related_sdd: SDD.md
+dataset:
+  name: operational_sellers
+  owner: Juan Pablo
+  producer: deterministic_source_simulator
+  source_type: postgresql_table
+  relation: source.sellers
+  grain: One row represents the latest operational state of one seller.
+  primary_key:
+    - seller_id
+  currency_applicability: not_applicable_no_monetary_fields
+incremental_interface:
+  cursor:
+    - source_updated_at
+    - seller_id
+  ordering: lexicographic
+  lower_boundary: exclusive
+  upper_boundary: inclusive
+  upper_boundary_source: Greatest cursor tuple in the stable source snapshot at run start.
+  initial_boundary: No lower predicate when no checkpoint exists.
+  null_cursor_behavior: Fail the entity before extraction.
+  overlap_window: disabled
+  hard_delete_capture: unsupported
+schema:
+  - name: seller_id
+    postgresql_type: text
+    logical_type: string
+    required: true
+    pattern: "^[0-9a-f]{32}$"
+  - name: seller_zip_code_prefix
+    postgresql_type: text
+    logical_type: string
+    required: true
+  - name: seller_city
+    postgresql_type: text
+    logical_type: string
+    required: true
+  - name: seller_state
+    postgresql_type: text
+    logical_type: string
+    required: true
+  - name: source_created_at
+    postgresql_type: timestamptz
+    logical_type: utc_instant
+    required: true
+    source: simulator_owned
+  - name: source_updated_at
+    postgresql_type: timestamptz
+    logical_type: utc_instant
+    required: true
+    source: simulator_owned
+conditional_rules:
+  - id: OP-SELL-CURSOR-001
+    severity: blocking
+    rule: source_updated_at and seller_id are never null.
+  - id: OP-SELL-CURSOR-002
+    severity: blocking
+    rule: Every mutation of an existing seller sets source_updated_at strictly later than its previous value.
+  - id: OP-SELL-VERSION-001
+    severity: blocking
+    rule: One seller_id and source_updated_at tuple cannot have conflicting payload hashes.
+rejection_policy:
+  evaluated_count: accepted_count + rejected_count
+  maximum_rejected_rows: 10
+  maximum_rejected_rate: 0.01
+  on_threshold_exceeded: Fail extraction, preserve rejected rows, and do not advance the checkpoint.
+freshness:
+  cadence: daily_capable_and_manually_triggerable
+  healthy_run_target_minutes: 15
+classification:
+  pii: none
+  secrets: false
+retention:
+  operational_state: Current state for the local project lifetime.
+  committed_bronze: Immutable for the local project lifetime.
+  quarantine: Immutable for the local project lifetime unless an explicit cleanup policy is accepted.
+compatibility:
+  policy: backward
+  breaking_changes:
+    - change cursor semantics
+    - change seller_id semantics
+    - remove or rename a consumed column
+    - narrow a consumed type
+consumers:
+  - incremental_sellers_ingestion
+known_limitations:
+  - Hard deletes are not captured.
+  - No business timestamp exists in this source (ADR-008).

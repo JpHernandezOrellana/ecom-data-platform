@@ -38,6 +38,14 @@ PRODUCTS: dict[str, tuple[str, ...]] = {
         "refund_count",
         "refunded_amount_brl",
     ),
+    "mart_daily_category_commerce": (
+        "reporting_date",
+        "product_category_name",
+        "product_category_name_english",
+        "eligible_item_count",
+        "category_gmv_brl",
+        "category_freight_value_brl",
+    ),
 }
 
 

@@ -23,6 +23,18 @@ _PHASE_2B_REFUNDS_WAREHOUSE_MIGRATION = (
 _PHASE_2B_REFUNDS_SOURCE_MIGRATION = (
     Path(__file__).resolve().parents[2] / "sql/source/004_order_refunds.sql"
 )
+_PHASE_2C_PRODUCTS_WAREHOUSE_MIGRATION = (
+    Path(__file__).resolve().parents[2] / "sql/warehouse/007_products.sql"
+)
+_PHASE_2C_PRODUCTS_SOURCE_MIGRATION = (
+    Path(__file__).resolve().parents[2] / "sql/source/005_products.sql"
+)
+_PHASE_2C_SELLERS_WAREHOUSE_MIGRATION = (
+    Path(__file__).resolve().parents[2] / "sql/warehouse/008_sellers.sql"
+)
+_PHASE_2C_SELLERS_SOURCE_MIGRATION = (
+    Path(__file__).resolve().parents[2] / "sql/source/006_sellers.sql"
+)
 
 
 def connect(dsn: str, *, retries: int = 0, base_delay_s: float = 1.0) -> psycopg.Connection:
@@ -98,4 +110,32 @@ def ensure_phase_2b_refunds_source_schema(conn: psycopg.Connection) -> None:
     """Apply the idempotent source.order_refunds migration (Phase 2B)."""
     with conn.cursor() as cur:
         cur.execute(_PHASE_2B_REFUNDS_SOURCE_MIGRATION.read_text())
+    conn.commit()
+
+
+def ensure_phase_2c_products_warehouse_schema(conn: psycopg.Connection) -> None:
+    """Apply the idempotent raw_stage.products migration (Phase 2C)."""
+    with conn.cursor() as cur:
+        cur.execute(_PHASE_2C_PRODUCTS_WAREHOUSE_MIGRATION.read_text())
+    conn.commit()
+
+
+def ensure_phase_2c_products_source_schema(conn: psycopg.Connection) -> None:
+    """Apply the idempotent source.products migration (Phase 2C)."""
+    with conn.cursor() as cur:
+        cur.execute(_PHASE_2C_PRODUCTS_SOURCE_MIGRATION.read_text())
+    conn.commit()
+
+
+def ensure_phase_2c_sellers_warehouse_schema(conn: psycopg.Connection) -> None:
+    """Apply the idempotent raw_stage.sellers migration (Phase 2C)."""
+    with conn.cursor() as cur:
+        cur.execute(_PHASE_2C_SELLERS_WAREHOUSE_MIGRATION.read_text())
+    conn.commit()
+
+
+def ensure_phase_2c_sellers_source_schema(conn: psycopg.Connection) -> None:
+    """Apply the idempotent source.sellers migration (Phase 2C)."""
+    with conn.cursor() as cur:
+        cur.execute(_PHASE_2C_SELLERS_SOURCE_MIGRATION.read_text())
     conn.commit()

@@ -82,6 +82,10 @@ jobs:
       - name: Initial load
         run: uv run python -m ecom.load
 
+      - name: dbt seed (static reference data)
+        working-directory: dbt
+        run: uv run --project .. dbt seed --profiles-dir .
+
       - name: dbt build (baseline candidate)
         working-directory: dbt
         run: PUBLICATION_ID=ci_baseline uv run --project .. dbt build --profiles-dir .
@@ -99,6 +103,11 @@ jobs:
             --dbt-manifest dbt/target/manifest.json
           uv run python -m ecom.publish \
             --product mart_daily_refunds \
+            --publication-id ci_baseline \
+            --test-results dbt/target/run_results.json \
+            --dbt-manifest dbt/target/manifest.json
+          uv run python -m ecom.publish \
+            --product mart_daily_category_commerce \
             --publication-id ci_baseline \
             --test-results dbt/target/run_results.json \
             --dbt-manifest dbt/target/manifest.json
@@ -129,6 +138,11 @@ jobs:
             --dbt-manifest dbt/target/manifest.json
           uv run python -m ecom.publish \
             --product mart_daily_refunds \
+            --publication-id ci_final \
+            --test-results dbt/target/run_results.json \
+            --dbt-manifest dbt/target/manifest.json
+          uv run python -m ecom.publish \
+            --product mart_daily_category_commerce \
             --publication-id ci_final \
             --test-results dbt/target/run_results.json \
             --dbt-manifest dbt/target/manifest.json

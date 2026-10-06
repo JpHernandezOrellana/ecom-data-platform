@@ -1,0 +1,88 @@
+contract_version: 1.0.0
+status: accepted
+accepted_by: Juan Pablo
+accepted_date: 2026-10-05
+related_sdd: SDD.md
+dataset:
+  name: olist_sellers_bootstrap
+  owner: Juan Pablo
+  producer: Olist
+  source_type: csv
+  source_file: dataset/olist_sellers_dataset.csv
+  manifest: data/manifest.json
+  source_url: https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce
+  license: CC BY-NC-SA 4.0
+  grain: One row represents one historical Olist seller.
+  primary_key:
+    - seller_id
+  currency_applicability: not_applicable_no_monetary_fields
+format:
+  encoding: utf-8
+  delimiter: ","
+  quote_character: '"'
+  header_required: true
+schema:
+  - name: seller_id
+    source_position: 1
+    logical_type: string
+    required: true
+    pattern: "^[0-9a-f]{32}$"
+    semantics: Stable Olist seller identifier.
+  - name: seller_zip_code_prefix
+    source_position: 2
+    logical_type: string
+    required: true
+    semantics: Preserved as a string, including leading zeros (SDD §9.3).
+  - name: seller_city
+    source_position: 3
+    logical_type: string
+    required: true
+  - name: seller_state
+    source_position: 4
+    logical_type: string
+    required: true
+bootstrap_mapping:
+  generated_fields:
+    source_created_at: configured bootstrap_loaded_at in UTC
+    source_updated_at: configured bootstrap_loaded_at in UTC
+quality_rules:
+  - id: OLIST-SELL-STRUCT-001
+    severity: blocking
+    rule: The header contains exactly the four contracted columns in contracted order.
+  - id: OLIST-SELL-KEY-001
+    severity: quarantine
+    rule: seller_id is non-null and matches the required pattern.
+  - id: OLIST-SELL-KEY-002
+    severity: blocking
+    rule: Accepted seller_id values are unique within the bootstrap input.
+rejection_policy:
+  evaluated_count: accepted_count + rejected_count
+  maximum_rejected_rows: 10
+  maximum_rejected_rate: 0.01
+  on_threshold_exceeded: Fail bootstrap after durably preserving rejected rows.
+observed_profile:
+  source_file_sha256: 1f643d2b950373b85735e7794b20986f528d7a000432e7c6f9bcbb44d0846a0e
+  logical_rows: 3095
+  unique_seller_ids: 3095
+classification:
+  pii: none
+  secrets: false
+freshness:
+  expectation: not_applicable_historical_snapshot
+retention:
+  source_file: Local input retained by the operator under the source license.
+  bootstrap_quarantine: Retain for the local project unless explicitly cleaned after evidence export.
+compatibility:
+  policy: exact_versioned_bootstrap_schema
+  breaking_changes:
+    - remove or rename a contracted column
+    - change a contracted logical type
+    - change seller_id semantics
+    - add a new required column
+consumers:
+  - deterministic_sellers_bootstrap
+known_limitations:
+  - No business timestamp exists in this source; source_created_at/source_updated_at are
+    entirely simulator-owned (ADR-008).
+  - seller_zip_code_prefix is not unique and is not canonicalized to geolocation (deferred,
+    docs/CURRENT_STATE.md §5).

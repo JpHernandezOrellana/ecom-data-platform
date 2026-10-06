@@ -1,0 +1,118 @@
+contract_version: 1.0.0
+metric_version: 1.0.0
+status: accepted
+accepted_by: Juan Pablo
+accepted_date: 2026-10-05
+related_sdd: SDD.md
+related_adrs:
+  - docs/adrs/ADR-005-commerce-metrics.md
+  - docs/adrs/ADR-008-category-seller-dimensions.md
+data_product:
+  name: mart_daily_category_commerce
+  owner: Juan Pablo
+  producer: phase_2c_dbt_project
+  relation: gold.mart_daily_category_commerce
+  grain: One row represents one order purchase-date cohort crossed with one product category, at item grain.
+  purpose: >
+    Certified BRL commerce value (GMV, freight) broken down by product category, reusing
+    the ADR-005 eligibility and exclusion rules at item grain instead of order grain.
+  primary_key:
+    - reporting_date
+    - product_category_name
+  currency_applicability: brl_only
+schema:
+  - name: reporting_date
+    postgresql_type: date
+    logical_type: date
+    required: true
+    semantics: Same cohort date as mart_daily_commerce (purchase instant, Sao Paulo -> UTC -> Santiago).
+  - name: product_category_name
+    postgresql_type: text
+    logical_type: string
+    required: true
+    semantics: >
+      Portuguese category name from the product dimension; the literal "unknown" when the
+      product's category is null (ADR-008). Never dropped.
+  - name: product_category_name_english
+    postgresql_type: text
+    logical_type: string
+    required: true
+    semantics: >
+      English translation from the static category lookup; "unknown" when
+      product_category_name is "unknown" or has no translation entry.
+  - name: eligible_item_count
+    postgresql_type: bigint
+    logical_type: integer
+    required: true
+    minimum: 0
+    semantics: Count of eligible order_items in this category/date cohort.
+  - name: category_gmv_brl
+    postgresql_type: numeric(18,2)
+    logical_type: decimal
+    required: true
+    minimum: 0
+    semantics: sum(order_items.price) over eligible items in this category/date cohort. Excludes freight.
+  - name: category_freight_value_brl
+    postgresql_type: numeric(18,2)
+    logical_type: decimal
+    required: true
+    minimum: 0
+    semantics: sum(order_items.freight_value) over eligible items in this category/date cohort.
+metrics:
+  canonical_glossary: docs/metrics.md
+  included:
+    - eligible_item_count
+    - category_gmv_brl
+    - category_freight_value_brl
+quality_rules:
+  - id: GOLD-CAT-GRAIN-001
+    severity: blocking
+    rule: (reporting_date, product_category_name) is unique and non-null.
+  - id: GOLD-CAT-MONEY-001
+    severity: blocking
+    rule: category_gmv_brl and category_freight_value_brl are non-negative.
+  - id: GOLD-CAT-RECON-001
+    severity: blocking
+    rule: >
+      sum(category_gmv_brl) grouped by reporting_date equals mart_daily_commerce.gmv_brl
+      for the same reporting_date.
+  - id: GOLD-CAT-ORPHAN-001
+    severity: blocking
+    rule: >
+      No order_item may reference a product_id absent from stg_products (no silent loss,
+      AGENTS.md 6.8); such rows fail the build rather than being silently excluded or
+      merged into the "unknown" category bucket.
+freshness:
+  cadence: daily_capable_and_manually_triggerable
+  healthy_run_target_minutes: 15
+publication:
+  candidate_schema: gold_candidate
+  candidate_relation_pattern: mart_daily_category_commerce__<publication_id>
+  certified_relation: gold.mart_daily_category_commerce
+  certified_relation_type: view
+  promotion: Replace the stable view and record publication metadata in one warehouse transaction after all required tests pass.
+  failed_candidate_behavior: Preserve the previously certified view target.
+  retention:
+    successful_candidates: 5
+    failed_candidate_days: 7
+classification:
+  pii: none
+  secrets: false
+retention:
+  certified_product: Retain the current certified view and its referenced candidate.
+compatibility:
+  policy: backward
+  breaking_changes:
+    - change grain or reporting date role
+    - change a metric formula or eligibility rule
+    - remove or rename a contracted field
+    - include freight in category_gmv_brl
+consumers:
+  - analyst
+  - portfolio_reviewer
+known_limitations:
+  - BRL only; CLP conversion is deferred to Phase 2D (ADR-007).
+  - Grained at item/category level; does not multiply order-level AOV semantics, which
+    remain defined only in mart_daily_commerce.
+  - A product with a null category is bucketed as "unknown" rather than dropped; this is
+    an accepted ADR-008 simplification, not an inferred category.

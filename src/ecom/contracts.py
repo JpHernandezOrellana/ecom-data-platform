@@ -18,6 +18,12 @@ PAYMENT_OPERATIONAL_CONTRACT_PATH = (
 REFUND_OPERATIONAL_CONTRACT_PATH = (
     REPOSITORY_ROOT / "contracts/source/operational_order_refunds.v1.yaml"
 )
+PRODUCT_BOOTSTRAP_CONTRACT_PATH = REPOSITORY_ROOT / "contracts/source/olist_products.v1.yaml"
+PRODUCT_OPERATIONAL_CONTRACT_PATH = (
+    REPOSITORY_ROOT / "contracts/source/operational_products.v1.yaml"
+)
+SELLER_BOOTSTRAP_CONTRACT_PATH = REPOSITORY_ROOT / "contracts/source/olist_sellers.v1.yaml"
+SELLER_OPERATIONAL_CONTRACT_PATH = REPOSITORY_ROOT / "contracts/source/operational_sellers.v1.yaml"
 
 
 def load_contract(path: str | Path) -> dict:

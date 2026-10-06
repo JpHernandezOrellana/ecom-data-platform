@@ -1,0 +1,112 @@
+contract_version: 1.0.0
+status: accepted
+accepted_by: Juan Pablo
+accepted_date: 2026-10-05
+related_sdd: SDD.md
+dataset:
+  name: operational_products
+  owner: Juan Pablo
+  producer: deterministic_source_simulator
+  source_type: postgresql_table
+  relation: source.products
+  grain: One row represents the latest operational state of one product.
+  primary_key:
+    - product_id
+  currency_applicability: not_applicable_no_monetary_fields
+incremental_interface:
+  cursor:
+    - source_updated_at
+    - product_id
+  ordering: lexicographic
+  lower_boundary: exclusive
+  upper_boundary: inclusive
+  upper_boundary_source: Greatest cursor tuple in the stable source snapshot at run start.
+  initial_boundary: No lower predicate when no checkpoint exists.
+  null_cursor_behavior: Fail the entity before extraction.
+  overlap_window: disabled
+  hard_delete_capture: unsupported
+schema:
+  - name: product_id
+    postgresql_type: text
+    logical_type: string
+    required: true
+    pattern: "^[0-9a-f]{32}$"
+  - name: product_category_name
+    postgresql_type: text
+    logical_type: string
+    required: false
+  - name: product_name_lenght
+    postgresql_type: integer
+    logical_type: integer
+    required: false
+  - name: product_description_lenght
+    postgresql_type: integer
+    logical_type: integer
+    required: false
+  - name: product_photos_qty
+    postgresql_type: integer
+    logical_type: integer
+    required: false
+  - name: product_weight_g
+    postgresql_type: integer
+    logical_type: integer
+    required: false
+  - name: product_length_cm
+    postgresql_type: integer
+    logical_type: integer
+    required: false
+  - name: product_height_cm
+    postgresql_type: integer
+    logical_type: integer
+    required: false
+  - name: product_width_cm
+    postgresql_type: integer
+    logical_type: integer
+    required: false
+  - name: source_created_at
+    postgresql_type: timestamptz
+    logical_type: utc_instant
+    required: true
+    source: simulator_owned
+  - name: source_updated_at
+    postgresql_type: timestamptz
+    logical_type: utc_instant
+    required: true
+    source: simulator_owned
+conditional_rules:
+  - id: OP-PROD-CURSOR-001
+    severity: blocking
+    rule: source_updated_at and product_id are never null.
+  - id: OP-PROD-CURSOR-002
+    severity: blocking
+    rule: Every mutation of an existing product sets source_updated_at strictly later than its previous value.
+  - id: OP-PROD-VERSION-001
+    severity: blocking
+    rule: One product_id and source_updated_at tuple cannot have conflicting payload hashes.
+rejection_policy:
+  evaluated_count: accepted_count + rejected_count
+  maximum_rejected_rows: 10
+  maximum_rejected_rate: 0.01
+  on_threshold_exceeded: Fail extraction, preserve rejected rows, and do not advance the checkpoint.
+freshness:
+  cadence: daily_capable_and_manually_triggerable
+  healthy_run_target_minutes: 15
+classification:
+  pii: none
+  secrets: false
+retention:
+  operational_state: Current state for the local project lifetime.
+  committed_bronze: Immutable for the local project lifetime.
+  quarantine: Immutable for the local project lifetime unless an explicit cleanup policy is accepted.
+compatibility:
+  policy: backward
+  breaking_changes:
+    - change cursor semantics
+    - change product_id semantics
+    - remove or rename a consumed column
+    - narrow a consumed type
+consumers:
+  - incremental_products_ingestion
+known_limitations:
+  - Hard deletes are not captured.
+  - No business timestamp exists in this source (ADR-008).

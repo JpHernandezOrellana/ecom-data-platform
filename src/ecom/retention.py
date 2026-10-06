@@ -8,7 +8,12 @@ from psycopg import sql
 from .config import Settings
 from .db import connect, ensure_phase_1_1_warehouse_schema
 
-PRODUCTS = ("mart_daily_order_fulfillment", "mart_daily_commerce", "mart_daily_refunds")
+PRODUCTS = (
+    "mart_daily_order_fulfillment",
+    "mart_daily_commerce",
+    "mart_daily_refunds",
+    "mart_daily_category_commerce",
+)
 RELATION_RE = re.compile(
     r"^gold_candidate\.(mart_daily_order_fulfillment|mart_daily_commerce|mart_daily_refunds)__[A-Za-z0-9_-]+$"
 )
