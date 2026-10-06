@@ -32,6 +32,11 @@ PRODUCTS: dict[str, tuple[str, ...]] = {
         "aov_brl",
         "canceled_item_value_brl",
         "unavailable_item_value_brl",
+        "gmv_clp",
+        "fx_rate_clp_per_brl",
+        "fx_rate_date",
+        "fx_rate_source",
+        "fx_rate_is_carried_forward",
     ),
     "mart_daily_refunds": (
         "reporting_date",

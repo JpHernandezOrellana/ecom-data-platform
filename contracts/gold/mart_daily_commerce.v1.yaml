@@ -1,21 +1,23 @@
-contract_version: 1.0.0
+contract_version: 1.1.0
 metric_version: 1.0.0
 status: accepted
 accepted_by: Juan Pablo
 accepted_date: 2026-10-04
+last_synchronized: 2026-10-06
 related_sdd: SDD.md
 related_adrs:
   - docs/adrs/ADR-005-commerce-metrics.md
+  - docs/adrs/ADR-007-fx-brl-clp.md
 data_product:
   name: mart_daily_commerce
   owner: Juan Pablo
   producer: phase_2a_dbt_project
   relation: gold.mart_daily_commerce
   grain: One row represents one order purchase-date cohort in America/Santiago.
-  purpose: Certified BRL commerce value (GMV, freight, AOV) for orders grouped by Chilean purchase date.
+  purpose: Certified BRL commerce value (GMV, freight, AOV) for orders grouped by Chilean purchase date, with an additive CLP translation of GMV (Phase 2D, ADR-007).
   primary_key:
     - reporting_date
-  currency_applicability: brl_only
+  currency_applicability: brl_and_additive_clp
 schema:
   - name: reporting_date
     postgresql_type: date
@@ -64,6 +66,39 @@ schema:
     required: true
     minimum: 0
     semantics: sum(price) for items on orders whose latest status is unavailable. Diagnostic only, excluded from gmv_brl.
+  - name: gmv_clp
+    postgresql_type: bigint
+    logical_type: integer
+    required: true
+    minimum: 0
+    semantics: >
+      gmv_brl converted to CLP via fx_rate_clp_per_brl, rounded half-up to the nearest
+      peso (ADR-007). Additive; never replaces gmv_brl.
+  - name: fx_rate_clp_per_brl
+    postgresql_type: numeric(18,6)
+    logical_type: decimal
+    required: true
+    minimum: 0
+    semantics: >
+      CLP per BRL cross-rate used for gmv_clp, derived via USD from BCB PTAX and SII
+      Dolar Observado (ADR-007).
+  - name: fx_rate_date
+    postgresql_type: date
+    logical_type: date
+    required: true
+    semantics: >
+      The older (more carried-forward) of the two legs' actual rate dates. Equals
+      reporting_date when both legs published same-day.
+  - name: fx_rate_source
+    postgresql_type: text
+    logical_type: string
+    required: true
+    allowed_values: ["bcb_ptax+sii_dolar_observado"]
+  - name: fx_rate_is_carried_forward
+    postgresql_type: boolean
+    logical_type: boolean
+    required: true
+    semantics: True when either leg's resolved rate_date differs from reporting_date.
 metrics:
   canonical_glossary: docs/metrics.md
   included:
@@ -74,6 +109,7 @@ metrics:
     - aov_brl
     - canceled_item_value_brl
     - unavailable_item_value_brl
+    - gmv_clp
 quality_rules:
   - id: GOLD-COM-GRAIN-001
     severity: blocking
@@ -93,6 +129,21 @@ quality_rules:
   - id: GOLD-COM-ORPHAN-001
     severity: blocking
     rule: No order_item may reference an order_id absent from stg_orders (no silent loss, AGENTS.md 6.8); such rows fail the build rather than being silently excluded.
+  - id: GOLD-COM-CLP-001
+    severity: blocking
+    rule: >
+      gmv_clp is non-negative; fx_rate_clp_per_brl is positive; fx_rate_date is
+      non-null; fx_rate_source equals "bcb_ptax+sii_dolar_observado" (ADR-007).
+  - id: GOLD-COM-CLP-002
+    severity: blocking
+    rule: gmv_clp equals round(gmv_brl * fx_rate_clp_per_brl) exactly (half-up, ADR-007).
+  - id: GOLD-COM-CLP-FAILCLOSED-001
+    severity: blocking
+    rule: >
+      Every reporting_date present in this mart must resolve a cross-rate within the
+      7-day carry-forward window on both legs (int_fx_cross_rate /
+      assert_fx_rate_resolves_for_commerce_dates); a date that cannot resolve fails the
+      build rather than publishing a null or zero gmv_clp.
 freshness:
   cadence: daily_capable_and_manually_triggerable
   healthy_run_target_minutes: 15
@@ -122,9 +173,17 @@ consumers:
   - analyst
   - portfolio_reviewer
 known_limitations:
-  - BRL only; CLP conversion is deferred to Phase 2D (ADR-007).
   - gmv_brl is gross of unobserved real-world refunds; synthetic demo refunds are reported
     separately in mart_daily_refunds (ADR-005), never netted here.
+  - CLP is implemented for gmv_clp only in this slice; freight_value_clp,
+    gross_order_value_clp, and aov_clp are deferred additive follow-ups (same pattern,
+    not yet certified).
+  - CLP figures are independently rounded per column; arithmetic identities that hold
+    exactly in BRL (e.g. gross = gmv + freight) are not guaranteed to hold exactly for
+    their CLP counterparts once more than one CLP column exists.
+  - A date whose cross-rate cannot resolve within the 7-day carry-forward window fails the
+    whole dbt build (ADR-007), not just this mart; see
+    assert_fx_rate_resolves_for_commerce_dates.
   - An order_item referencing an order_id absent from stg_orders fails the dbt build
     (GOLD-COM-ORPHAN-001) rather than being quarantined row-by-row; recovering from this
     requires fixing upstream extraction/bootstrap ordering, not editing this mart.

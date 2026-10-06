@@ -1,0 +1,74 @@
+contract_version: 1.0.0
+status: accepted
+accepted_by: Juan Pablo
+accepted_date: 2026-10-06
+related_sdd: SDD.md
+dataset:
+  name: fx_rate_usd_clp
+  owner: Juan Pablo
+  producer: servicio_de_impuestos_internos_chile
+  source_type: external_public_html
+  relation: raw_stage.fx_rate_usd_clp
+  source_url: https://www.sii.cl/valores_y_fechas/dolar/dolar{year}.htm
+  grain: One row represents the official Dolar Observado CLP/USD quote for one calendar date.
+  primary_key:
+    - rate_date
+  currency_applicability: fx_reference_rate
+schema:
+  - name: rate_date
+    postgresql_type: date
+    logical_type: date
+    required: true
+    semantics: Calendar date the Dolar Observado quote applies to.
+  - name: dolar_observado
+    postgresql_type: numeric(18,6)
+    logical_type: decimal
+    required: true
+    semantics: Dolar Observado quote, CLP per USD (single official reference, no buy/sell split).
+  - name: retrieved_at
+    postgresql_type: timestamptz
+    logical_type: utc_instant
+    required: true
+    semantics: When ecom.fetch_fx_rates retrieved this row (not a business timestamp).
+quality_rules:
+  - id: FX-CLP-STRUCT-001
+    severity: blocking
+    rule: >
+      The yearly SII page must contain the single consolidated table
+      (id="table_export") with a header row and 12 month columns; if that table is
+      absent or its structure does not match, the whole year's fetch is quarantined
+      rather than guessing at a different table (no silent loss, AGENTS.md 6.8).
+  - id: FX-CLP-CELL-001
+    severity: quarantine
+    rule: >
+      A cell must either be empty (no rate published that day, e.g. weekend/holiday) or
+      parse as a Chilean-locale decimal (comma as decimal separator). An unparseable
+      non-empty cell is quarantined for that single date; it does not fail the rest of
+      the year's page.
+  - id: FX-CLP-RANGE-001
+    severity: quarantine
+    rule: dolar_observado is a positive decimal.
+rejection_policy:
+  on_parse_failure: Write a quarantine record under data/quarantine/fx/usd_clp/ and skip the affected date(s); do not crash the whole fetch for one bad page or cell.
+freshness:
+  cadence: manually_triggerable_bounded_date_range
+classification:
+  pii: none
+  secrets: false
+retention:
+  reference_rates: Immutable once published by SII; idempotent re-fetch overwrites with the same value.
+compatibility:
+  policy: backward
+  breaking_changes:
+    - change the cross-rate derivation that consumes this table (ADR-007)
+    - remove or rename a consumed column
+consumers:
+  - fx_cross_rate_derivation
+known_limitations:
+  - SII's page is an HTML table, not a clean API; a future site redesign could silently
+    break the parser (ADR-007's documented cost) — it must then fail the fetch closed
+    (FX-CLP-STRUCT-001), not guess.
+  - No automated test exercises the live SII endpoint; CI and pytest use deterministic
+    fixture rows (tests/fixtures/fx/usd_clp.csv) via ecom.fetch_fx_rates --fixture-dir.
+  - Weekends and Chilean holidays have no published rate; carry-forward is applied
+    downstream (ADR-007), not in this table.

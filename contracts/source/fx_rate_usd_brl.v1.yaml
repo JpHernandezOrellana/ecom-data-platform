@@ -1,0 +1,68 @@
+contract_version: 1.0.0
+status: accepted
+accepted_by: Juan Pablo
+accepted_date: 2026-10-06
+related_sdd: SDD.md
+dataset:
+  name: fx_rate_usd_brl
+  owner: Juan Pablo
+  producer: banco_central_do_brasil
+  source_type: external_public_api
+  relation: raw_stage.fx_rate_usd_brl
+  source_url: https://olinda.bcb.gov.br/olinda/servico/PTAX/versao/v1/odata/CotacaoDolarPeriodo
+  grain: One row represents the official PTAX USD/BRL quote for one calendar date.
+  primary_key:
+    - rate_date
+  currency_applicability: fx_reference_rate
+schema:
+  - name: rate_date
+    postgresql_type: date
+    logical_type: date
+    required: true
+    semantics: Calendar date the PTAX quote was published for (BCB's dataHoraCotacao date part).
+  - name: cotacao_compra
+    postgresql_type: numeric(18,6)
+    logical_type: decimal
+    required: true
+    semantics: PTAX buy quote, BRL per USD.
+  - name: cotacao_venda
+    postgresql_type: numeric(18,6)
+    logical_type: decimal
+    required: true
+    semantics: PTAX sell quote, BRL per USD.
+  - name: retrieved_at
+    postgresql_type: timestamptz
+    logical_type: utc_instant
+    required: true
+    semantics: When ecom.fetch_fx_rates retrieved this row (not a business timestamp).
+quality_rules:
+  - id: FX-BRL-STRUCT-001
+    severity: blocking
+    rule: >
+      The BCB response for the requested range parses as JSON with a "value" array; an
+      unparseable response quarantines the entire fetch attempt rather than inserting
+      partial data (no silent loss, AGENTS.md 6.8).
+  - id: FX-BRL-RANGE-001
+    severity: quarantine
+    rule: cotacao_compra and cotacao_venda are positive decimals.
+rejection_policy:
+  on_parse_failure: Write a quarantine record under data/quarantine/fx/usd_brl/ and skip the affected date; do not crash the whole fetch for one bad row.
+freshness:
+  cadence: manually_triggerable_bounded_date_range
+classification:
+  pii: none
+  secrets: false
+retention:
+  reference_rates: Immutable once published by BCB; idempotent re-fetch overwrites with the same value.
+compatibility:
+  policy: backward
+  breaking_changes:
+    - change the cross-rate derivation that consumes this table (ADR-007)
+    - remove or rename a consumed column
+consumers:
+  - fx_cross_rate_derivation
+known_limitations:
+  - No automated test exercises the live BCB endpoint; CI and pytest use deterministic
+    fixture rows (tests/fixtures/fx/usd_brl.csv) via ecom.fetch_fx_rates --fixture-dir.
+  - Weekends and Brazilian holidays have no published rate; carry-forward is applied
+    downstream (ADR-007), not in this table.

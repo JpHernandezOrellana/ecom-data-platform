@@ -91,6 +91,13 @@ jobs:
           uv run python -m ecom.extract_customers
           uv run python -m ecom.load_customers
 
+      - name: Fetch FX rates (fixture, no network)
+        run: |
+          uv run python -m ecom.fetch_fx_rates \
+            --from-date 2017-01-01 \
+            --to-date 2018-02-01 \
+            --fixture-dir tests/fixtures/fx
+
       - name: dbt seed (static reference data)
         working-directory: dbt
         run: uv run --project .. dbt seed --profiles-dir .

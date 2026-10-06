@@ -41,6 +41,9 @@ _PHASE_2C_CUSTOMERS_WAREHOUSE_MIGRATION = (
 _PHASE_2C_CUSTOMERS_SOURCE_MIGRATION = (
     Path(__file__).resolve().parents[2] / "sql/source/007_customers.sql"
 )
+_PHASE_2D_FX_WAREHOUSE_MIGRATION = (
+    Path(__file__).resolve().parents[2] / "sql/warehouse/010_fx_rates.sql"
+)
 
 
 def connect(dsn: str, *, retries: int = 0, base_delay_s: float = 1.0) -> psycopg.Connection:
@@ -158,4 +161,11 @@ def ensure_phase_2c_customers_source_schema(conn: psycopg.Connection) -> None:
     """Apply the idempotent source.customers migration (Phase 2C)."""
     with conn.cursor() as cur:
         cur.execute(_PHASE_2C_CUSTOMERS_SOURCE_MIGRATION.read_text())
+    conn.commit()
+
+
+def ensure_phase_2d_fx_warehouse_schema(conn: psycopg.Connection) -> None:
+    """Apply the idempotent raw_stage.fx_rate_* migration (Phase 2D)."""
+    with conn.cursor() as cur:
+        cur.execute(_PHASE_2D_FX_WAREHOUSE_MIGRATION.read_text())
     conn.commit()

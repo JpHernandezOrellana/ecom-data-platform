@@ -29,7 +29,17 @@ models:
       - name: order_id
         tests: [not_null, unique]
   - name: mart_daily_commerce
-    description: Certified BRL commerce value by Chilean purchase-date cohort (ADR-005).
+    description: >
+      Certified BRL commerce value by Chilean purchase-date cohort (ADR-005), with
+      additive CLP columns (gmv_clp and rate provenance, ADR-007/Phase 2D).
+    columns:
+      - name: reporting_date
+        tests: [not_null, unique]
+  - name: int_fx_cross_rate
+    description: >
+      BRL/CLP cross-rate via USD for every reporting_date needed by mart_daily_commerce,
+      with 7-day carry-forward per leg (ADR-007). A null clp_per_brl here is caught by
+      assert_fx_rate_resolves_for_commerce_dates, not silently published.
     columns:
       - name: reporting_date
         tests: [not_null, unique]

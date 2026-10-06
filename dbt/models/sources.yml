@@ -17,3 +17,7 @@ sources:
         identifier: sellers
       - name: raw_customers
         identifier: customers
+      - name: raw_fx_rate_usd_brl
+        identifier: fx_rate_usd_brl
+      - name: raw_fx_rate_usd_clp
+        identifier: fx_rate_usd_clp
