@@ -1,13 +1,14 @@
 # Metric Glossary
 
-**Version:** 1.1.0<br>
+**Version:** 1.2.0<br>
 **Status:** Accepted  
 **Owner:** Juan Pablo  
 **Accepted by:** Juan Pablo  
 **Initial accepted date:** 2026-09-06<br>
 **Last synchronized:** 2026-10-05<br>
-**Applies to:** `mart_daily_order_fulfillment`, `mart_daily_commerce`, and `mart_daily_refunds`<br>
-**Related design:** `SDD.md`, Sections 18-20; ADR-004; ADR-005<br>
+**Applies to:** `mart_daily_order_fulfillment`, `mart_daily_commerce`, `mart_daily_refunds`,
+and `mart_daily_category_commerce`<br>
+**Related design:** `SDD.md`, Sections 18-20; ADR-004; ADR-005; ADR-008<br>
 
 ## Shared semantics
 
@@ -274,6 +275,46 @@ result is not a replacement for GMV.
 `silver.int_payment_reconciliation` is diagnostic only. `order_payments.payment_value`
 may be compared with item price plus freight, but it is never the authority for GMV and a
 disagreement is not interpreted as a refund.
+
+## Category commerce mart semantics
+
+### Category commerce mart grain
+
+`gold.mart_daily_category_commerce` has one row per `(reporting_date, product_category_name)`,
+at item grain rather than order grain (ADR-008): an order can contain items from multiple
+categories, so the order-level `int_order_commerce` pre-aggregation is not reusable here.
+`reporting_date` uses the same purchase-date cohort derivation as `mart_daily_commerce`.
+
+Eligibility reapplies ADR-005's rule at item grain: an item is eligible when its order's
+latest status is not `canceled`/`unavailable`. A product with a null
+`product_category_name` is bucketed as the literal category `"unknown"`, never dropped; a
+product absent entirely from the product dimension (a true orphan) fails the build instead
+of being merged into that bucket.
+
+### Eligible item count
+
+**Column:** `eligible_item_count`<br>
+**Definition:** Count of eligible order_items in the category/date cohort.<br>
+**Null behavior:** Not nullable; zero is valid.
+
+### Category GMV
+
+**Column:** `category_gmv_brl`<br>
+**Definition:** Sum of `order_items.price` over eligible items in the category/date
+cohort.<br>
+**Currency/type:** BRL fixed-precision decimal.<br>
+**Exclusions:** Freight, canceled/unavailable orders, refunds.<br>
+**Reconciliation:** `sum(category_gmv_brl)` grouped by `reporting_date` equals
+`mart_daily_commerce.gmv_brl` for the same date (GOLD-CAT-RECON-001) — the two marts slice
+the same eligible item population two different ways.
+
+### Category freight value
+
+**Column:** `category_freight_value_brl`<br>
+**Definition:** Sum of `order_items.freight_value` over eligible items in the
+category/date cohort.<br>
+**Relationship to category GMV:** Reported separately, never included in
+`category_gmv_brl`.
 
 ## Change policy
 

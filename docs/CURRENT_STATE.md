@@ -1,9 +1,10 @@
 # Current Project State
 
 **Last updated:** 2026-10-05
-**Current phase:** Phase 2B closed (order_payments ingestion + synthetic refunds +
-`mart_daily_refunds`); evidence: `docs/evidence/phase2b-closure.md`
-**Next phase:** Phase 2C (products, sellers, customers)
+**Current phase:** Phase 2C slice 1 closed (products + sellers dimensions +
+`mart_daily_category_commerce`); evidence: `docs/evidence/phase2c-closure.md`
+**Next phase:** Phase 2C slice 2 (customers, `customer_id` vs `customer_unique_id`) or
+Phase 2D (FX/CLP)
 
 This document is the required entry point for any agent or contributor before touching
 code. It does not replace the formal sources — it routes to them. Read this file and
@@ -190,41 +191,48 @@ with GitHub Actions CI on every push/PR (§6a).
 
 ## 5. Not implemented yet
 
-- Customers, products, and sellers (Phase 2C, design not started).
+- `customers` ingestion and the `customer_id` vs `customer_unique_id` distinction (Phase
+  2C slice 2, design not started — ADR-008 "Deferred").
+- Any seller-grained Gold mart; `sellers` is ingested and orphan-checked but not yet
+  consumed by a certified metric.
 - Geolocation canonicalization remains separately deferred; no implementation phase is
   assigned yet.
 - BRL->CLP FX conversion (ADR-007 design accepted; implementation deferred to Phase 2D).
-- No `mutate_items`/`mutate_payments`-equivalent CLI for either entity (`generate_refunds.py`
-  doubles as both the refunds demo tool and the test fixture generator); incremental-
-  update demos for items/payments use direct test-only inserts.
+- No `mutate_items`/`mutate_payments`/`mutate_products`/`mutate_sellers`-equivalent CLI
+  for any of these entities (`generate_refunds.py` doubles as both the refunds demo tool
+  and the test fixture generator); incremental-update demos use direct test-only inserts.
 - Concurrent-write guarantees during extraction; hard-delete capture (unchanged from
-  Phase 1, applies to `order_items`/`order_payments`/`order_refunds` too).
+  Phase 1, applies to every entity ingested so far).
 - Airflow, dashboard, cloud infra, CDC, distributed processing, agent/MCP write access.
 
 CI (`.github/workflows/ci.yml`) now exercises `orders`, `order_items`, `order_payments`,
-and `order_refunds` against synthetic fixtures, publishing all three Gold products at
-baseline and final (§6a). It has not been validated against the full Olist dataset for
-any entity.
+`order_refunds`, `products`, and `sellers` against synthetic fixtures, publishing all four
+Gold products at baseline and final (§6a). It has not been validated against the full
+Olist dataset for any entity.
 
 ## 6a. CI
 
 `.github/workflows/ci.yml` runs on every PR and push to `main`: `uv sync --frozen`, Ruff
 lint + format check, unit tests, then a full pipeline cycle (bootstrap orders -> extract
--> load -> dbt build -> publish all three products -> integration tests -> converge ->
-dbt build -> publish all three products -> reconciliation) against two ephemeral
-PostgreSQL containers started via the existing `compose.yaml`. `order_items`,
-`order_payments`, and `order_refunds` ingestion all happen inside the integration pytest
-step (`tests/test_phase2a_items.py`, `tests/test_phase2b_payments.py`,
-`tests/test_phase2b_refunds.py`), not as separate CI steps; by the time the "final" dbt
-build runs, their `raw_stage` tables have real rows, so `mart_daily_commerce` and
-`mart_daily_refunds`'s dbt tests run against real data in the final candidate (the
-baseline candidate is trivially empty, same pattern as orders before its first
-mutation). Bootstraps use small synthetic fixtures
+-> load -> dbt seed -> dbt build -> publish all four products -> integration tests ->
+converge -> dbt build -> publish all four products -> reconciliation) against two
+ephemeral PostgreSQL containers started via the existing `compose.yaml`. `order_items`,
+`order_payments`, `order_refunds`, `products`, and `sellers` ingestion all happen inside
+the integration pytest step (`tests/test_phase2a_items.py`,
+`tests/test_phase2b_payments.py`, `tests/test_phase2b_refunds.py`,
+`tests/test_phase2c_products_sellers.py`), not as separate CI steps; by the time the
+"final" dbt build runs, their `raw_stage` tables have real rows, so `mart_daily_commerce`,
+`mart_daily_refunds`, and `mart_daily_category_commerce`'s dbt tests run against real data
+in the final candidate (the baseline candidate is trivially empty, same pattern as orders
+before its first mutation). Bootstraps use small synthetic fixtures
 (`tests/fixtures/orders_small.csv`, `tests/fixtures/order_items_small.csv`,
-`tests/fixtures/order_payments_small.csv`, with `--allow-unverified-input`; refunds have
-no bootstrap fixture since they are purely generated), never the full Olist CSVs.
-Verified locally end-to-end (the exact CI command sequence, run against local Docker)
-before being committed.
+`tests/fixtures/order_payments_small.csv`, `tests/fixtures/products_small.csv`,
+`tests/fixtures/sellers_small.csv`, with `--allow-unverified-input`; refunds have no
+bootstrap fixture since they are purely generated), never the full Olist CSVs. `dbt seed`
+loads the static `product_category_name_translation` reference table (ADR-008 — not
+ingested through bootstrap/extract/load since it has no natural key mutation). Verified
+locally end-to-end (the exact CI command sequence, run against local Docker) before being
+committed.
 
 ## 6. What to read for a given task
 
@@ -239,6 +247,7 @@ before being committed.
 | Touch `order_items`/commerce mart (Phase 2A) | ADR-005, ADR-006, §7a below, `src/ecom/*_items.py`, `dbt/models/intermediate/int_order_commerce.sql` |
 | Touch `order_payments`/reconciliation (Phase 2B) | ADR-005, ADR-006, `src/ecom/*_payments.py`, `dbt/models/intermediate/int_payment_reconciliation.sql` |
 | Touch synthetic refunds/`mart_daily_refunds` (Phase 2B) | ADR-005, `src/ecom/generate_refunds.py`, `src/ecom/*_refunds.py`, `dbt/models/gold_candidate/mart_daily_refunds.sql` |
+| Touch `products`/`sellers`/category commerce mart (Phase 2C slice 1) | ADR-008, §7c below, `src/ecom/*_products.py`, `src/ecom/*_sellers.py`, `dbt/models/intermediate/int_order_items_category.sql` |
 | Investigate a regression | `docs/evidence/*` (historical, read-only) |
 
 Do not infer architecture from filenames alone, and do not re-read the entire repo for a
@@ -261,9 +270,14 @@ narrowly scoped task.
   fails closed beyond that; integer half-up rounding for CLP. Implementation deferred to
   Phase 2D — BRL ships first.
 - Data contracts for `order_items` are accepted and implemented (§2).
+- **Products/sellers dimensions and category commerce mart:** accepted in
+  [ADR-008](adrs/ADR-008-category-seller-dimensions.md). Simple single-column keys reuse
+  ADR-002 unchanged (no composite cursor); `product_category_name_translation` is a dbt
+  seed, not an ingested entity; `mart_daily_category_commerce` reapplies ADR-005's
+  eligibility rules at item grain and reconciles to `mart_daily_commerce.gmv_brl`.
 
 Any future change to ingestion pattern, checkpoint semantics, storage format, warehouse
-engine, orchestration, Gold grain, or metric semantics beyond what these three ADRs cover
+engine, orchestration, Gold grain, or metric semantics beyond what these ADRs cover
 requires its own new/updated ADR before implementation (`AGENTS.md` §23).
 
 ## 7a. Phase 2A status (order items + BRL commerce mart) — closed 2026-10-05
@@ -293,11 +307,25 @@ Non-blocking items carried forward:
 4. The refund generator always refunds 100% of a payment; no partial-refund modeling
    (accepted simplification for a demo fixture).
 
+## 7c. Phase 2C slice 1 status (products + sellers + category commerce mart) — closed 2026-10-05
+
+Implemented, tested, and closed. Closure evidence:
+[`docs/evidence/phase2c-closure.md`](evidence/phase2c-closure.md). Non-blocking items
+carried forward:
+
+1. `customers` ingestion and the `customer_id`/`customer_unique_id` distinction are not
+   part of this slice (ADR-008 "Deferred").
+2. `sellers` is ingested and orphan-checked but has no seller-grained Gold metric yet.
+3. Backfill mode for `products`/`sellers` has not been exercised against equal-timestamp
+   ties at scale.
+4. No `mutate_products`/`mutate_sellers`-equivalent CLI; incremental-update demos use
+   direct test-only inserts.
+
 ## 8. Recommended next slice
 
-Phase 2C: products, sellers, customers. Category/seller analytics models and the
-`customer_unique_id` vs `customer_id` distinction (SDD §9.4); no change to the Phase
-2A/2B monetary grain.
+Phase 2C slice 2: `customers` ingestion and the `customer_unique_id` vs `customer_id`
+distinction (SDD §9.4), pending its own ADR per `AGENTS.md` §23 (new customer-history
+semantics). No change to the Phase 2A/2B/2C-slice-1 monetary grain.
 
 ## 9. Keeping this file honest
 

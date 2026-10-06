@@ -26,8 +26,12 @@ blocking no-orphan-items invariant (GOLD-COM-ORPHAN-001). Phase 2B adds `order_p
 ingestion with a payment-reconciliation diagnostic model (`int_payment_reconciliation`,
 never a GMV input) and a deterministic synthetic refund generator
 (`ecom.generate_refunds`, parallel to `ecom.mutate`) feeding `gold.mart_daily_refunds`
-(grained by refund date, never netted into `gmv_brl`). Verified locally end-to-end
-against synthetic fixtures; not yet run against the full Olist dataset.
+(grained by refund date, never netted into `gmv_brl`). Phase 2C slice 1 adds `products`
+and `sellers` as simple-key dimensions (ADR-008, reusing ADR-002 unchanged) and
+`gold.mart_daily_category_commerce`, breaking BRL commerce value down by product category
+at item grain; its total reconciles exactly to `mart_daily_commerce.gmv_brl` per date.
+Verified locally end-to-end against synthetic fixtures; not yet run against the full
+Olist dataset.
 
 Phase 1 closure evidence is in [`docs/evidence/phase1-closure.md`](docs/evidence/phase1-closure.md).
 Phase 1.1 hardening evidence is in
@@ -36,6 +40,8 @@ Phase 2A closure evidence is in
 [`docs/evidence/phase2a-closure.md`](docs/evidence/phase2a-closure.md).
 Phase 2B closure evidence is in
 [`docs/evidence/phase2b-closure.md`](docs/evidence/phase2b-closure.md).
+Phase 2C slice 1 closure evidence is in
+[`docs/evidence/phase2c-closure.md`](docs/evidence/phase2c-closure.md).
 
 ## Business problem
 
@@ -122,6 +128,7 @@ Phase 1 contains no monetary metrics.
 | [`ADR-005`](docs/adrs/ADR-005-commerce-metrics.md) | GMV, AOV, freight, cancellations, refunds | Accepted |
 | [`ADR-006`](docs/adrs/ADR-006-composite-entity-cursor.md) | Composite-key cursor for `order_items` | Accepted |
 | [`ADR-007`](docs/adrs/ADR-007-fx-brl-clp.md) | BRL-to-CLP FX source and conversion policy | Accepted (design; CLP implementation deferred) |
+| [`ADR-008`](docs/adrs/ADR-008-category-seller-dimensions.md) | Products/sellers dimensions and category commerce mart | Accepted |
 | [`Metric glossary`](docs/metrics.md) | Canonical certified-mart metric semantics | Accepted |
 | [`Test matrix`](docs/testing/phase1-test-matrix.md) | Required Phase 1 verification | Accepted |
 | [`Phase 1 closure evidence`](docs/evidence/phase1-closure.md) | Acceptance results and layer reconciliation | Closed |
@@ -141,13 +148,21 @@ Phase 1 contains no monetary metrics.
 | [`Operational order_payments contract`](contracts/source/operational_order_payments.v1.yaml) | Incremental PostgreSQL boundary (Phase 2B) | Accepted |
 | [`Operational order_refunds contract`](contracts/source/operational_order_refunds.v1.yaml) | Synthetic refund events boundary (Phase 2B) | Accepted |
 | [`Refunds Gold contract`](contracts/gold/mart_daily_refunds.v1.yaml) | Certified synthetic refund product (Phase 2B) | Accepted |
+| [`Olist products contract`](contracts/source/olist_products.v1.yaml) | Historical CSV boundary (Phase 2C) | Accepted |
+| [`Operational products contract`](contracts/source/operational_products.v1.yaml) | Incremental PostgreSQL boundary (Phase 2C) | Accepted |
+| [`Olist sellers contract`](contracts/source/olist_sellers.v1.yaml) | Historical CSV boundary (Phase 2C) | Accepted |
+| [`Operational sellers contract`](contracts/source/operational_sellers.v1.yaml) | Incremental PostgreSQL boundary (Phase 2C) | Accepted |
+| [`Category commerce Gold contract`](contracts/gold/mart_daily_category_commerce.v1.yaml) | Certified BRL category breakdown (Phase 2C) | Accepted |
+| [`Phase 2C slice 1 closure evidence`](docs/evidence/phase2c-closure.md) | Products/sellers + category commerce results | Closed |
 
 ## Deliberate scope
 
 Phase 1 contains one complete orders vertical slice. Phase 2A adds `order_items` + BRL
-GMV/AOV. Phase 2B adds `order_payments` + synthetic refunds. All deliberately exclude:
+GMV/AOV. Phase 2B adds `order_payments` + synthetic refunds. Phase 2C slice 1 adds
+`products`/`sellers` dimensions + category commerce breakdown. All deliberately exclude:
 
-- customers, products, and sellers (Phase 2C);
+- `customers` and the `customer_id`/`customer_unique_id` distinction (Phase 2C slice 2);
+- any seller-grained Gold metric (`sellers` is ingested but not yet consumed by one);
 - a true net-of-refund GMV/revenue figure (ADR-005: `mart_daily_commerce.gmv_brl` is
   never netted against `mart_daily_refunds`; a reader computes any net view explicitly);
 - BRL->CLP conversion (Phase 2D, ADR-007 design accepted, not implemented);
@@ -239,17 +254,41 @@ default it refunds the lexicographically first unrefunded payment, or target one
 explicitly with `--order-id`/`--payment-sequential`. `gold.mart_daily_refunds` is grained
 by refund date and is never netted into `mart_daily_commerce.gmv_brl`.
 
+## Phase 2C slice 1 runbook (products + sellers + category commerce)
+
+Run after the Phase 2A runbook above, against the same running stack:
+
+```bash
+uv run python -m ecom.bootstrap_products --csv dataset/olist_products_dataset.csv --attempt-id boot-prod-001
+uv run python -m ecom.extract_products
+uv run python -m ecom.load_products
+uv run python -m ecom.bootstrap_sellers --csv dataset/olist_sellers_dataset.csv --attempt-id boot-sell-001
+uv run python -m ecom.extract_sellers
+uv run python -m ecom.load_sellers
+cd dbt && uv run --project .. dbt seed --profiles-dir .
+PUBLICATION_ID=phase2c uv run --project .. dbt build --profiles-dir . && cd ..
+uv run python -m ecom.publish --product mart_daily_category_commerce --publication-id phase2c --test-results dbt/target/run_results.json --dbt-manifest dbt/target/manifest.json
+```
+
+`dbt seed` loads the static `product_category_name_translation` reference table (ADR-008
+— not ingested through bootstrap/extract/load, since it has no natural key mutation).
+`gold.mart_daily_category_commerce` breaks BRL commerce value down by product category at
+item grain, reapplying ADR-005's eligibility rules; `sum(category_gmv_brl)` by date
+reconciles exactly to `mart_daily_commerce.gmv_brl`. `customers` and any seller-grained
+Gold metric remain out of scope (ADR-008 "Deferred").
+
 ## Continuous integration
 
 Every pull request and push to `main` runs
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml): Ruff lint and format checks, unit
-tests, then a full pipeline cycle (bootstrap, extract, load, dbt build, publish all three
-Gold products, integration tests — including the `order_items`/`order_payments`/
-`order_refunds` vertical slices — and final
-reconciliation) against two ephemeral PostgreSQL containers using the repository's
+tests, then a full pipeline cycle (bootstrap, extract, load, dbt seed, dbt build, publish
+all four Gold products, integration tests — including the
+`order_items`/`order_payments`/`order_refunds`/`products`/`sellers` vertical slices — and
+final reconciliation) against two ephemeral PostgreSQL containers using the repository's
 `compose.yaml`. CI bootstraps from small synthetic fixtures
 (`tests/fixtures/orders_small.csv`, `tests/fixtures/order_items_small.csv`,
-`tests/fixtures/order_payments_small.csv`), never the full Olist CSVs.
+`tests/fixtures/order_payments_small.csv`, `tests/fixtures/products_small.csv`,
+`tests/fixtures/sellers_small.csv`), never the full Olist CSVs.
 
 ## Next steps
 

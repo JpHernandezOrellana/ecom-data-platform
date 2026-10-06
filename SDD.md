@@ -1326,8 +1326,14 @@ Phase 2D). Sub-phases, in order:
   and ingestion, payment reconciliation diagnostics (`int_payment_reconciliation`),
   synthetic refund event generator (`ecom.generate_refunds`), and `mart_daily_refunds`.
   Evidence: `docs/evidence/phase2b-closure.md`.
-- **2C — products, sellers, customers:** category/seller analytics; `customer_unique_id`
-  vs `customer_id` distinction; no change to the Phase 2A/2B monetary grain.
+- **2C — products, sellers, customers** (ADR-008 accepted for slice 1):
+  - **slice 1 (closed 2026-10-05):** `products`/`sellers` dimensions (simple-key, reusing
+    ADR-002 unchanged) and `mart_daily_category_commerce` (BRL commerce value by product
+    category at item grain, reconciling to `mart_daily_commerce.gmv_brl`). Evidence:
+    `docs/evidence/phase2c-closure.md`.
+  - **slice 2 (not started):** `customers` ingestion and the `customer_unique_id` vs
+    `customer_id` distinction; requires its own ADR (customer-history semantics). No
+    change to the Phase 2A/2B/2C-slice-1 monetary grain.
 - **2D — FX and CLP reporting:** implement the ADR-007 design (BCB PTAX + SII Dólar
   Observado ingestion, cross-rate, additive CLP columns).
 - Airflow after tasks work independently (unchanged).
