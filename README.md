@@ -359,10 +359,18 @@ docker compose exec airflow airflow tasks states-for-dag-run ecom_pipeline <run_
 (parallel across entities), `fetch_fx_rates`, one shared `dbt seed`/`dbt build`, and four
 independent `publish_*` tasks — every task is a thin wrapper around the exact CLI
 commands in the runbooks above (ADR-009). It does **not** orchestrate bootstrap, the
-source-reader setup script, `ecom.mutate`/`ecom.generate_refunds`, or `ecom.retention`
-(run those separately, as today). `fetch_fx_rates`'s default window is the last 14 days
-relative to the DAG's logical date; against the historical demo fixtures, fetch that
-range directly first (see `docs/evidence/airflow-orchestration-closure.md`).
+source-reader setup script, or `ecom.mutate`/`ecom.generate_refunds` (run those
+separately, as today). `fetch_fx_rates`'s default window is the last 14 days relative to
+the DAG's logical date; against the historical demo fixtures, fetch that range directly
+first (see `docs/evidence/airflow-orchestration-closure.md`).
+
+Candidate retention runs as its own DAG, `ecom_retention` (one task, `schedule=None`),
+kept separate per ADR-009 so it never widens `ecom_pipeline`'s scope:
+
+```bash
+docker compose exec airflow airflow dags unpause ecom_retention
+docker compose exec airflow airflow dags trigger ecom_retention
+```
 
 ## Continuous integration
 

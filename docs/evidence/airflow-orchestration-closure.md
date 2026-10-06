@@ -148,15 +148,36 @@ uv run --extra dev pytest -m "not integration" tests/     26 passed
 No `src/ecom/*` or `dbt/models/*` file changed in this slice besides `dbt/profiles.yml`'s
 one-line fix; the DAG and Docker infrastructure are entirely new, additive files.
 
+## `ecom_retention` (separate DAG, added 2026-10-06)
+
+Per ADR-009's own reversal/migration path, `ecom.retention` was deliberately kept out of
+`ecom_pipeline`. It is now orchestrated as its own `dags/ecom_retention.py` — one
+`BashOperator` task, `schedule=None` (same manual-trigger posture as `ecom_pipeline`) —
+rather than folded into the main DAG. Verified the same way: built a fresh Docker stack,
+published one Gold candidate (`mart_daily_order_fulfillment`, publication `ret2`) so
+retention had a real successful candidate to act on, started `airflow`, confirmed both
+DAGs parse with zero import errors (`airflow dags list-import-errors` -> `No data
+found`), then:
+
+```text
+airflow dags unpause ecom_retention
+airflow dags trigger ecom_retention
+airflow dags state ecom_retention <run_id>   ->  success
+```
+
+No changes to `ecom_pipeline` were needed to add this — confirming the separation ADR-009
+anticipated actually holds in practice, not just in the design document.
+
 ## Known limitations (carried forward, non-blocking)
 
-- This DAG is not exercised by `.github/workflows/ci.yml`; CI continues to run the
+- Neither DAG is exercised by `.github/workflows/ci.yml`; CI continues to run the
   individual commands directly. Adding Airflow to CI is a separate, explicitly
   out-of-scope decision given the added runtime/complexity cost (ADR-009).
 - `SequentialExecutor`/SQLite is Airflow's own documented local/dev configuration, not a
   claim of production operational maturity.
-- `ecom.retention` is not orchestrated by this DAG (deliberately, ADR-009) — it remains a
-  separately run command.
+- `ecom_retention` runs on `schedule=None` (manual trigger only); enabling a recurring
+  cadence (e.g. daily) is a one-line change deferred until there is a concrete freshness
+  requirement to test against, not enabled speculatively.
 - The webserver's gunicorn workers produce noisy provider-import warnings on restart;
   harmless, but not investigated further since DAG verification does not depend on the
   web UI.

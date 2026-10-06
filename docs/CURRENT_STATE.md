@@ -9,9 +9,9 @@ every extract/load/dbt/publish stage. Phase 2D implemented for
 `mart_daily_category_commerce`, evidence: `docs/evidence/phase2c-closure.md`; slice 2:
 `customers` dimension, evidence: `docs/evidence/phase2c-slice2-closure.md`)
 **Next phase:** Extend CLP to `freight_value_clp`/`gross_order_value_clp`/`aov_clp` and
-to `mart_daily_category_commerce`/`mart_daily_refunds` (same pattern, additive), add
-`ecom.retention` to the DAG or a scheduled cadence, or a new, separately ADR'd
-customer-history/seller-performance slice
+to `mart_daily_category_commerce`/`mart_daily_refunds` (same pattern, additive), enable a
+recurring schedule for either DAG, or a new, separately ADR'd customer-history/
+seller-performance slice
 
 This document is the required entry point for any agent or contributor before touching
 code. It does not replace the formal sources — it routes to them. Read this file and
@@ -213,8 +213,9 @@ with GitHub Actions CI on every push/PR (§6a).
   and the test fixture generator); incremental-update demos use direct test-only inserts.
 - Concurrent-write guarantees during extraction; hard-delete capture (unchanged from
   Phase 1, applies to every entity ingested so far).
-- `ecom.retention` is not part of the Airflow DAG (deliberately, ADR-009); dashboard,
-  cloud infra, CDC, distributed processing, agent/MCP write access.
+- A recurring (e.g. daily) Airflow schedule for either DAG (both are manually
+  triggerable only); dashboard, cloud infra, CDC, distributed processing, agent/MCP
+  write access.
 
 CI (`.github/workflows/ci.yml`) now exercises `orders`, `order_items`, `order_payments`,
 `order_refunds`, `products`, `sellers`, and `customers` against synthetic fixtures,
@@ -403,20 +404,24 @@ Non-blocking items carried forward:
 
 1. Not exercised by CI (`.github/workflows/ci.yml` still runs commands directly) —
    explicitly out of scope per ADR-009.
-2. `ecom.retention` is not part of this DAG (deliberately).
+2. `ecom.retention` is orchestrated separately: `dags/ecom_retention.py` (one task,
+   `schedule=None`), not folded into `ecom_pipeline` — added and verified 2026-10-06.
 3. `SequentialExecutor`/SQLite is a local/dev configuration, not production Airflow.
 4. The DAG's default `fetch_fx_rates` window (`ds-14` to `ds`) only resolves CLP for
    orders purchased recently; running it against the historical demo fixtures requires
    fetching that specific historical range separately first (not a DAG defect — this is
    the same fail-closed behavior from ADR-007/Phase 2D, now confirmed to propagate
    correctly through Airflow's `trigger_rule=all_success`).
+5. Neither DAG runs on a recurring schedule yet (both `schedule=None`); enabling one is a
+   one-line change deferred until there is a concrete freshness requirement.
 
 ## 8. Recommended next slice
 
 Extend CLP to the remaining `mart_daily_commerce` columns and to
 `mart_daily_category_commerce`/`mart_daily_refunds` (ADR-007, additive, same pattern).
-Alternatively, add `ecom.retention` to a schedule, or a new customer-history or
-seller-performance slice, pending its own ADR — none of these is started.
+Alternatively, enable a recurring schedule for `ecom_retention` or `ecom_pipeline` once a
+concrete freshness requirement exists, or a new customer-history or seller-performance
+slice, pending its own ADR — none of these is started.
 
 ## 9. Keeping this file honest
 

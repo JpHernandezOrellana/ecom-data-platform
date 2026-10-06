@@ -59,8 +59,10 @@ mirroring how `publish.py` already treats products independently.
 - **`ecom.mutate`/`ecom.generate_refunds`** — demo/test data generators, not production
   pipeline stages.
 - **`ecom.retention`** — candidate retention is a separate, independently schedulable
-  concern; not added to this DAG to keep its scope narrow (a later DAG or schedule may add
-  it without touching this one).
+  concern; not added to this DAG to keep its scope narrow. Implemented as its own
+  `ecom_retention` DAG (one task, `schedule=None`, same manual-trigger posture) rather
+  than folded into `ecom_pipeline` — exactly the reversal/migration path anticipated
+  below, exercised rather than left purely theoretical.
 - Transformation logic itself. Per `SDD.md` §30: *"Airflow does not contain
   transformation logic or serve as the only checkpoint store."* Every task is a thin
   wrapper that shells out to an existing, independently tested CLI command; `control.*`
