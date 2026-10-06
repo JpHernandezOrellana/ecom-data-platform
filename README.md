@@ -30,8 +30,10 @@ never a GMV input) and a deterministic synthetic refund generator
 and `sellers` as simple-key dimensions (ADR-008, reusing ADR-002 unchanged) and
 `gold.mart_daily_category_commerce`, breaking BRL commerce value down by product category
 at item grain; its total reconciles exactly to `mart_daily_commerce.gmv_brl` per date.
-Verified locally end-to-end against synthetic fixtures; not yet run against the full
-Olist dataset.
+Phase 2C slice 2 adds `customers` as a dimension and exposes the `customer_id` vs
+`customer_unique_id` distinction (SDD §9.4), with no new metric defined on it yet — that
+remains deferred pending its own ADR. Verified locally end-to-end against synthetic
+fixtures; not yet run against the full Olist dataset.
 
 Phase 1 closure evidence is in [`docs/evidence/phase1-closure.md`](docs/evidence/phase1-closure.md).
 Phase 1.1 hardening evidence is in
@@ -42,6 +44,8 @@ Phase 2B closure evidence is in
 [`docs/evidence/phase2b-closure.md`](docs/evidence/phase2b-closure.md).
 Phase 2C slice 1 closure evidence is in
 [`docs/evidence/phase2c-closure.md`](docs/evidence/phase2c-closure.md).
+Phase 2C slice 2 closure evidence is in
+[`docs/evidence/phase2c-slice2-closure.md`](docs/evidence/phase2c-slice2-closure.md).
 
 ## Business problem
 
@@ -154,14 +158,20 @@ Phase 1 contains no monetary metrics.
 | [`Operational sellers contract`](contracts/source/operational_sellers.v1.yaml) | Incremental PostgreSQL boundary (Phase 2C) | Accepted |
 | [`Category commerce Gold contract`](contracts/gold/mart_daily_category_commerce.v1.yaml) | Certified BRL category breakdown (Phase 2C) | Accepted |
 | [`Phase 2C slice 1 closure evidence`](docs/evidence/phase2c-closure.md) | Products/sellers + category commerce results | Closed |
+| [`Olist customers contract`](contracts/source/olist_customers.v1.yaml) | Historical CSV boundary (Phase 2C slice 2) | Accepted |
+| [`Operational customers contract`](contracts/source/operational_customers.v1.yaml) | Incremental PostgreSQL boundary (Phase 2C slice 2) | Accepted |
+| [`Phase 2C slice 2 closure evidence`](docs/evidence/phase2c-slice2-closure.md) | Customers dimension ingestion results | Closed |
 
 ## Deliberate scope
 
 Phase 1 contains one complete orders vertical slice. Phase 2A adds `order_items` + BRL
-GMV/AOV. Phase 2B adds `order_payments` + synthetic refunds. Phase 2C slice 1 adds
-`products`/`sellers` dimensions + category commerce breakdown. All deliberately exclude:
+GMV/AOV. Phase 2B adds `order_payments` + synthetic refunds. Phase 2C adds
+`products`/`sellers`/`customers` dimensions + category commerce breakdown. All
+deliberately exclude:
 
-- `customers` and the `customer_id`/`customer_unique_id` distinction (Phase 2C slice 2);
+- any new-vs-returning-customer metric (`customers` is ingested and the `customer_id`
+  vs `customer_unique_id` distinction is exposed, but no metric is defined on it — that
+  requires its own ADR, SDD §37);
 - any seller-grained Gold metric (`sellers` is ingested but not yet consumed by one);
 - a true net-of-refund GMV/revenue figure (ADR-005: `mart_daily_commerce.gmv_brl` is
   never netted against `mart_daily_refunds`; a reader computes any net view explicitly);
@@ -274,21 +284,41 @@ uv run python -m ecom.publish --product mart_daily_category_commerce --publicati
 — not ingested through bootstrap/extract/load, since it has no natural key mutation).
 `gold.mart_daily_category_commerce` breaks BRL commerce value down by product category at
 item grain, reapplying ADR-005's eligibility rules; `sum(category_gmv_brl)` by date
-reconciles exactly to `mart_daily_commerce.gmv_brl`. `customers` and any seller-grained
-Gold metric remain out of scope (ADR-008 "Deferred").
+reconciles exactly to `mart_daily_commerce.gmv_brl`. Any seller-grained Gold metric
+remains out of scope (ADR-008 "Deferred").
+
+## Phase 2C slice 2 runbook (customers dimension)
+
+Run after (or alongside) the Phase 1 runbook above, against the same running stack —
+`customers` is tightly coupled 1:1 with `orders`, so it should be bootstrapped right after
+it:
+
+```bash
+uv run python -m ecom.bootstrap_customers --csv dataset/olist_customers_dataset.csv --attempt-id boot-cust-001
+uv run python -m ecom.extract_customers
+uv run python -m ecom.load_customers
+```
+
+`silver.stg_customers` exposes both `customer_id` (order-associated row) and
+`customer_unique_id` (repeat-customer identity, SDD §9.4). No metric is defined on
+`customer_unique_id` in this slice; that is deferred pending its own ADR.
 
 ## Continuous integration
 
 Every pull request and push to `main` runs
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml): Ruff lint and format checks, unit
-tests, then a full pipeline cycle (bootstrap, extract, load, dbt seed, dbt build, publish
-all four Gold products, integration tests — including the
-`order_items`/`order_payments`/`order_refunds`/`products`/`sellers` vertical slices — and
-final reconciliation) against two ephemeral PostgreSQL containers using the repository's
-`compose.yaml`. CI bootstraps from small synthetic fixtures
+tests, then a full pipeline cycle (bootstrap orders+customers, extract+load orders,
+extract+load customers, dbt seed, dbt build, publish all four Gold products, integration
+tests — including the
+`order_items`/`order_payments`/`order_refunds`/`products`/`sellers`/`customers` vertical
+slices — and final reconciliation) against two ephemeral PostgreSQL containers using the
+repository's `compose.yaml`. `customers` bootstraps alongside `orders` as an explicit CI
+step (not inside pytest) because it is tightly coupled 1:1 with orders; see
+`docs/CURRENT_STATE.md` §6a for why. CI bootstraps from small synthetic fixtures
 (`tests/fixtures/orders_small.csv`, `tests/fixtures/order_items_small.csv`,
 `tests/fixtures/order_payments_small.csv`, `tests/fixtures/products_small.csv`,
-`tests/fixtures/sellers_small.csv`), never the full Olist CSVs.
+`tests/fixtures/sellers_small.csv`, `tests/fixtures/customers_small.csv`), never the full
+Olist CSVs.
 
 ## Next steps
 

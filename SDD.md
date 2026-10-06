@@ -1331,9 +1331,11 @@ Phase 2D). Sub-phases, in order:
     ADR-002 unchanged) and `mart_daily_category_commerce` (BRL commerce value by product
     category at item grain, reconciling to `mart_daily_commerce.gmv_brl`). Evidence:
     `docs/evidence/phase2c-closure.md`.
-  - **slice 2 (not started):** `customers` ingestion and the `customer_unique_id` vs
-    `customer_id` distinction; requires its own ADR (customer-history semantics). No
-    change to the Phase 2A/2B/2C-slice-1 monetary grain.
+  - **slice 2 (closed 2026-10-05):** `customers` ingested as a simple-key dimension
+    (reusing ADR-002 unchanged); exposes `customer_id` vs `customer_unique_id` (SDD
+    §9.4). Deliberately scoped to ingestion only — no new-vs-returning-customer metric,
+    which would require its own ADR (customer-history semantics). Evidence:
+    `docs/evidence/phase2c-slice2-closure.md`.
 - **2D — FX and CLP reporting:** implement the ADR-007 design (BCB PTAX + SII Dólar
   Observado ingestion, cross-rate, additive CLP columns).
 - Airflow after tasks work independently (unchanged).
