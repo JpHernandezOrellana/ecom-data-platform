@@ -1,14 +1,14 @@
 # Metric Glossary
 
-**Version:** 1.2.0<br>
+**Version:** 1.3.0<br>
 **Status:** Accepted  
 **Owner:** Juan Pablo  
 **Accepted by:** Juan Pablo  
 **Initial accepted date:** 2026-09-06<br>
-**Last synchronized:** 2026-10-05<br>
+**Last synchronized:** 2026-10-06<br>
 **Applies to:** `mart_daily_order_fulfillment`, `mart_daily_commerce`, `mart_daily_refunds`,
-and `mart_daily_category_commerce`<br>
-**Related design:** `SDD.md`, Sections 18-20; ADR-004; ADR-005; ADR-008<br>
+`mart_daily_category_commerce`<br>
+**Related design:** `SDD.md`, Sections 18-20; ADR-004; ADR-005; ADR-007; ADR-008<br>
 
 ## Shared semantics
 
@@ -275,6 +275,42 @@ result is not a replacement for GMV.
 `silver.int_payment_reconciliation` is diagnostic only. `order_payments.payment_value`
 may be compared with item price plus freight, but it is never the authority for GMV and a
 disagreement is not interpreted as a refund.
+
+## CLP translation (ADR-007, Phase 2D)
+
+### Scope
+
+`mart_daily_commerce.gmv_clp` is the only certified CLP figure so far. It is an additive
+translation of `gmv_brl`; it never replaces or is read instead of `gmv_brl`.
+`freight_value_clp`, `gross_order_value_clp`, `aov_clp`, and CLP columns on
+`mart_daily_category_commerce`/`mart_daily_refunds` do not exist yet (deferred, same
+pattern).
+
+### Cross-rate
+
+**Definition:** `clp_per_brl = usd_clp_rate / usd_brl_rate`, where `usd_brl_rate` is the
+average of BCB PTAX's buy and sell USD/BRL quotes, and `usd_clp_rate` is SII's Dolar
+Observado CLP/USD quote.<br>
+**Rate date:** The order's `reporting_date` first; if no rate is published for that exact
+date on either leg, the most recent prior published rate up to 7 calendar days back is
+used (independently per leg).<br>
+**Fail-closed:** A `reporting_date` with no resolvable rate within 7 days on either leg
+fails the dbt build (`assert_fx_rate_resolves_for_commerce_dates`) rather than publishing
+a null or zero `gmv_clp`.
+
+### GMV in CLP
+
+**Column:** `gmv_clp`<br>
+**Definition:** `round(gmv_brl * clp_per_brl)`, half-up to the nearest integer peso.<br>
+**Type:** `bigint`, non-negative.
+
+### Rate provenance
+
+**Columns:** `fx_rate_clp_per_brl`, `fx_rate_date`, `fx_rate_source`,
+`fx_rate_is_carried_forward`.<br>
+**Purpose:** Every `gmv_clp` figure is traceable to the exact rate, its date, and whether
+either leg was carried forward — a reader must never have to guess why a CLP number does
+not match a naive same-day lookup.
 
 ## Category commerce mart semantics
 

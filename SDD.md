@@ -805,7 +805,8 @@ Olist monetary values are treated as BRL based on the Brazilian marketplace cont
 ## 20.3 Chilean reporting currency
 
 Phase 2A/2B certified consumer marts expose source-currency BRL amounts. Phase 2D adds CLP
-columns separately under ADR-007; CLP never silently replaces the original BRL amounts.
+columns separately under ADR-007, starting with `mart_daily_commerce.gmv_clp`; CLP never
+silently replaces the original BRL amounts.
 
 The conversion contract must preserve:
 
@@ -1269,7 +1270,7 @@ The procedure completed on 2026-09-06. This canonical `SDD.md` is authoritative 
 | Known lifecycle inconsistencies exist | Naive hard tests would reject real historical data | Preserve, flag, quantify, and exclude only where metric eligibility requires |
 | Full dataset is externally hosted | Clean run may require source access and Kaggle terms | Manifest, download instructions, checksums, synthetic test fixtures |
 | Local disk loss can remove Bronze and control state | Infrastructure-level data loss | Reproducible bootstrap; production disaster recovery is outside MVP |
-| Accepted FX design is not yet implemented or source-validated | CLP monetary marts cannot yet be certified | Implement and test ADR-007 in Phase 2D; keep existing marts BRL-only |
+| CLP implemented for `gmv_clp` only; other BRL columns/marts remain untranslated | A reader must not assume every monetary column has a CLP counterpart | Extend additively, same pattern, before claiming full CLP coverage |
 | Scope expansion delays working evidence | Portfolio remains documentation-only | Enforce vertical-slice phase gates |
 
 Portfolio reliability targets for representative Phase 1 runs are:
@@ -1336,8 +1337,13 @@ Phase 2D). Sub-phases, in order:
     §9.4). Deliberately scoped to ingestion only — no new-vs-returning-customer metric,
     which would require its own ADR (customer-history semantics). Evidence:
     `docs/evidence/phase2c-slice2-closure.md`.
-- **2D — FX and CLP reporting:** implement the ADR-007 design (BCB PTAX + SII Dólar
-  Observado ingestion, cross-rate, additive CLP columns).
+- **2D — FX and CLP reporting (implemented for `gmv_clp`, 2026-10-06):** `ecom.fetch_fx_rates`
+  ingests BCB PTAX + SII Dólar Observado into `raw_stage.fx_rate_usd_brl`/
+  `fx_rate_usd_clp`; `silver.int_fx_cross_rate` resolves the 7-day-carry-forward
+  cross-rate per `mart_daily_commerce.reporting_date`, failing the build closed when a
+  date cannot resolve (ADR-007). `mart_daily_commerce.gmv_clp` is the first and so far
+  only certified CLP column; other BRL columns and other marts remain additive follow-up
+  work. Evidence: `docs/evidence/phase2d-closure.md`.
 - Airflow after tasks work independently (unchanged).
 
 ## Phase 3 - Engineering maturity

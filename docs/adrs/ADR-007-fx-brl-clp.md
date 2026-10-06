@@ -1,13 +1,16 @@
 # ADR-007: BRL-to-CLP foreign exchange source and conversion policy
 
-**Status:** Accepted (design only — implementation deferred to the CLP phase)
+**Status:** Accepted (implemented for `mart_daily_commerce.gmv_clp`; other BRL columns
+and other marts remain additive follow-up work)
 **Date:** 2026-10-04
 **Owner:** Juan Pablo
 **Accepted by:** Juan Pablo
 **Accepted date:** 2026-10-04
+**Implemented date:** 2026-10-06
 **Decision scope:** Phase 2D (CLP reporting), design accepted now so Phase 2A/2B BRL
 models are built against a known future column contract
 **Related SDD:** `SDD.md`, deferred-decisions section; `docs/metrics.md`
+**Implementation evidence:** `docs/evidence/phase2d-closure.md`
 
 ## Context
 
@@ -135,6 +138,37 @@ Costs and limitations:
 - SII's published page format is HTML tables keyed by month, not a clean API; the future
   ingestion job must parse it defensively and treat unparseable pages as quarantined
   source data, not a crash.
+
+## Implementation notes (2026-10-06)
+
+- `ecom.fetch_fx_rates` fetches both legs for a bounded `--from-date`/`--to-date` range
+  into `raw_stage.fx_rate_usd_brl`/`fx_rate_usd_clp` (direct warehouse tables, not
+  simulator-owned `source.*` — these are external reference data with no operational
+  cursor, just an idempotent upsert by `rate_date`).
+- HTTP calls shell out to `curl` rather than Python's `urllib`, to avoid depending on a
+  correctly configured local CA bundle (a real portability issue encountered during
+  implementation) and to avoid adding a `requests`/`certifi` dependency for two simple GET
+  calls (`AGENTS.md` §13).
+- SII's per-year page actually contains one clean consolidated table
+  (`id="table_export"`, one row per day, one column per month, Chilean comma-decimal),
+  not the twelve per-month tables the page also renders — confirmed by inspecting the live
+  page before writing the parser, not assumed from the ADR's prose.
+- `--fixture-dir` makes the command read deterministic CSV fixtures instead of calling the
+  live sources; CI and all automated tests use this path exclusively (no test depends on
+  BCB/SII availability).
+- The 7-day carry-forward and fail-closed behavior (`int_fx_cross_rate`,
+  `assert_fx_rate_resolves_for_commerce_dates`) was verified by a manual reproduction, not
+  an automated pytest test: no existing test in this repository invokes `dbt` from
+  pytest, and introducing that pattern for one scenario was judged worse than a documented
+  manual repro (see `docs/evidence/phase2d-closure.md`).
+- Scope for this slice is `mart_daily_commerce.gmv_clp` only, plus its four provenance
+  columns. `freight_value_clp`, `gross_order_value_clp`, `aov_clp`, and CLP on
+  `mart_daily_category_commerce`/`mart_daily_refunds` are deferred additive follow-ups
+  using the identical pattern — not a design gap, a scope decision to ship one complete
+  vertical slice of the mechanism before widening it (`AGENTS.md` §5).
+- CLP columns are independently rounded per column; this repository does not assert that
+  BRL-side arithmetic identities (e.g. `gross = gmv + freight`) also hold exactly for their
+  CLP counterparts, since none of those additional CLP columns exist yet.
 
 ## Reversal and migration path
 

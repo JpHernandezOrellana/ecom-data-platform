@@ -32,8 +32,12 @@ and `sellers` as simple-key dimensions (ADR-008, reusing ADR-002 unchanged) and
 at item grain; its total reconciles exactly to `mart_daily_commerce.gmv_brl` per date.
 Phase 2C slice 2 adds `customers` as a dimension and exposes the `customer_id` vs
 `customer_unique_id` distinction (SDD §9.4), with no new metric defined on it yet — that
-remains deferred pending its own ADR. Verified locally end-to-end against synthetic
-fixtures; not yet run against the full Olist dataset.
+remains deferred pending its own ADR. Phase 2D implements ADR-007's BRL->CLP design for
+`mart_daily_commerce.gmv_clp`: `ecom.fetch_fx_rates` pulls BCB PTAX and SII Dolar
+Observado rates for a bounded date range, and `silver.int_fx_cross_rate` resolves a
+7-day-carry-forward cross-rate per date, failing the build closed when a date cannot
+resolve. Verified locally end-to-end against synthetic fixtures; not yet run against the
+full Olist dataset.
 
 Phase 1 closure evidence is in [`docs/evidence/phase1-closure.md`](docs/evidence/phase1-closure.md).
 Phase 1.1 hardening evidence is in
@@ -46,6 +50,8 @@ Phase 2C slice 1 closure evidence is in
 [`docs/evidence/phase2c-closure.md`](docs/evidence/phase2c-closure.md).
 Phase 2C slice 2 closure evidence is in
 [`docs/evidence/phase2c-slice2-closure.md`](docs/evidence/phase2c-slice2-closure.md).
+Phase 2D closure evidence is in
+[`docs/evidence/phase2d-closure.md`](docs/evidence/phase2d-closure.md).
 
 ## Business problem
 
@@ -100,7 +106,8 @@ The project does not relabel Brazilian values as Chilean data.
 - Naive historical timestamps are interpreted under the documented `America/Sao_Paulo` assumption.
 - Canonical instants are stored in UTC.
 - Consumer reporting dates use `America/Santiago`.
-- CLP reporting is deferred to Phase 2D under ADR-007; Phase 2A/2B marts remain BRL-only.
+- CLP reporting (ADR-007) is implemented for `mart_daily_commerce.gmv_clp` only; every
+  other mart and column remains BRL-only until its own additive follow-up.
 
 Phase 1 contains no monetary metrics.
 
@@ -131,7 +138,7 @@ Phase 1 contains no monetary metrics.
 | [`ADR-004`](docs/adrs/ADR-004-fulfillment-mart.md) | Gold grain, metrics, and publication | Accepted |
 | [`ADR-005`](docs/adrs/ADR-005-commerce-metrics.md) | GMV, AOV, freight, cancellations, refunds | Accepted |
 | [`ADR-006`](docs/adrs/ADR-006-composite-entity-cursor.md) | Composite-key cursor for `order_items` | Accepted |
-| [`ADR-007`](docs/adrs/ADR-007-fx-brl-clp.md) | BRL-to-CLP FX source and conversion policy | Accepted (design; CLP implementation deferred) |
+| [`ADR-007`](docs/adrs/ADR-007-fx-brl-clp.md) | BRL-to-CLP FX source and conversion policy | Accepted (implemented for gmv_clp) |
 | [`ADR-008`](docs/adrs/ADR-008-category-seller-dimensions.md) | Products/sellers dimensions and category commerce mart | Accepted |
 | [`Metric glossary`](docs/metrics.md) | Canonical certified-mart metric semantics | Accepted |
 | [`Test matrix`](docs/testing/phase1-test-matrix.md) | Required Phase 1 verification | Accepted |
@@ -161,6 +168,9 @@ Phase 1 contains no monetary metrics.
 | [`Olist customers contract`](contracts/source/olist_customers.v1.yaml) | Historical CSV boundary (Phase 2C slice 2) | Accepted |
 | [`Operational customers contract`](contracts/source/operational_customers.v1.yaml) | Incremental PostgreSQL boundary (Phase 2C slice 2) | Accepted |
 | [`Phase 2C slice 2 closure evidence`](docs/evidence/phase2c-slice2-closure.md) | Customers dimension ingestion results | Closed |
+| [`FX usd_brl rate contract`](contracts/source/fx_rate_usd_brl.v1.yaml) | External BCB PTAX reference boundary (Phase 2D) | Accepted |
+| [`FX usd_clp rate contract`](contracts/source/fx_rate_usd_clp.v1.yaml) | External SII Dolar Observado reference boundary (Phase 2D) | Accepted |
+| [`Phase 2D closure evidence`](docs/evidence/phase2d-closure.md) | gmv_clp implementation + fail-closed verification | Closed |
 
 ## Deliberate scope
 
@@ -175,7 +185,8 @@ deliberately exclude:
 - any seller-grained Gold metric (`sellers` is ingested but not yet consumed by one);
 - a true net-of-refund GMV/revenue figure (ADR-005: `mart_daily_commerce.gmv_brl` is
   never netted against `mart_daily_refunds`; a reader computes any net view explicitly);
-- BRL->CLP conversion (Phase 2D, ADR-007 design accepted, not implemented);
+- CLP beyond `mart_daily_commerce.gmv_clp` (Phase 2D, ADR-007; freight/gross/AOV in CLP
+  and CLP on the category/refunds marts are additive follow-ups, not yet implemented);
 - Airflow;
 - dashboarding;
 - cloud infrastructure;
@@ -303,22 +314,45 @@ uv run python -m ecom.load_customers
 `customer_unique_id` (repeat-customer identity, SDD §9.4). No metric is defined on
 `customer_unique_id` in this slice; that is deferred pending its own ADR.
 
+## Phase 2D runbook (BRL->CLP FX, gmv_clp)
+
+Run after the Phase 2A runbook above, against the same running stack:
+
+```bash
+uv run python -m ecom.fetch_fx_rates --from-date 2016-01-01 --to-date 2018-12-31
+# or, without live network access:
+uv run python -m ecom.fetch_fx_rates --from-date 2017-01-01 --to-date 2018-02-01 --fixture-dir tests/fixtures/fx
+cd dbt && uv run --project .. dbt seed --profiles-dir .
+PUBLICATION_ID=phase2d uv run --project .. dbt build --profiles-dir . && cd ..
+uv run python -m ecom.publish --product mart_daily_commerce --publication-id phase2d --test-results dbt/target/run_results.json --dbt-manifest dbt/target/manifest.json
+```
+
+`ecom.fetch_fx_rates` pulls BCB PTAX (BRL leg) and SII Dolar Observado (CLP leg) for the
+requested range and upserts them into `raw_stage.fx_rate_usd_brl`/`fx_rate_usd_clp` (no
+network call with `--fixture-dir`). `silver.int_fx_cross_rate` resolves a BRL/CLP
+cross-rate per `mart_daily_commerce` cohort date, carrying forward up to 7 calendar days
+per leg; a date that cannot resolve on either leg fails the dbt build closed
+(`assert_fx_rate_resolves_for_commerce_dates`), per ADR-007.
+
 ## Continuous integration
 
 Every pull request and push to `main` runs
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml): Ruff lint and format checks, unit
 tests, then a full pipeline cycle (bootstrap orders+customers, extract+load orders,
-extract+load customers, dbt seed, dbt build, publish all four Gold products, integration
-tests — including the
-`order_items`/`order_payments`/`order_refunds`/`products`/`sellers`/`customers` vertical
-slices — and final reconciliation) against two ephemeral PostgreSQL containers using the
-repository's `compose.yaml`. `customers` bootstraps alongside `orders` as an explicit CI
-step (not inside pytest) because it is tightly coupled 1:1 with orders; see
-`docs/CURRENT_STATE.md` §6a for why. CI bootstraps from small synthetic fixtures
+extract+load customers, fetch FX rates, dbt seed, dbt build, publish all four Gold
+products, integration tests — including the
+`order_items`/`order_payments`/`order_refunds`/`products`/`sellers`/`customers`/FX
+vertical slices — and final reconciliation) against two ephemeral PostgreSQL containers
+using the repository's `compose.yaml`. `customers` bootstraps alongside `orders` as an
+explicit CI step (not inside pytest) because it is tightly coupled 1:1 with orders; see
+`docs/CURRENT_STATE.md` §6a for why. `ecom.fetch_fx_rates` always runs with
+`--fixture-dir tests/fixtures/fx` in CI — the live BCB/SII sources are never called by
+any automated test. CI bootstraps from small synthetic fixtures
 (`tests/fixtures/orders_small.csv`, `tests/fixtures/order_items_small.csv`,
 `tests/fixtures/order_payments_small.csv`, `tests/fixtures/products_small.csv`,
-`tests/fixtures/sellers_small.csv`, `tests/fixtures/customers_small.csv`), never the full
-Olist CSVs.
+`tests/fixtures/sellers_small.csv`, `tests/fixtures/customers_small.csv`,
+`tests/fixtures/fx/usd_brl.csv`, `tests/fixtures/fx/usd_clp.csv`), never the full Olist
+CSVs or the live FX endpoints.
 
 ## Next steps
 

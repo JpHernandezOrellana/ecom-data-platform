@@ -1,12 +1,14 @@
 # Current Project State
 
 **Last updated:** 2026-10-05
-**Current phase:** Phase 2C closed (slice 1: products + sellers dimensions +
-`mart_daily_category_commerce`, evidence: `docs/evidence/phase2c-closure.md`; slice 2:
-`customers` dimension + `customer_id`/`customer_unique_id` distinction, evidence:
+**Current phase:** Phase 2D implemented for `mart_daily_commerce.gmv_clp` (BRL->CLP FX,
+ADR-007; evidence: `docs/evidence/phase2d-closure.md`). Phase 2C fully closed (slice 1:
+products + sellers + `mart_daily_category_commerce`, evidence:
+`docs/evidence/phase2c-closure.md`; slice 2: `customers` dimension, evidence:
 `docs/evidence/phase2c-slice2-closure.md`)
-**Next phase:** Phase 2D (BRL->CLP FX implementation, ADR-007) or a new, separately ADR'd
-customer-history/seller-performance slice if a concrete requirement justifies one
+**Next phase:** Extend CLP to `freight_value_clp`/`gross_order_value_clp`/`aov_clp` and
+to `mart_daily_category_commerce`/`mart_daily_refunds` (same pattern, additive), or a new,
+separately ADR'd customer-history/seller-performance slice
 
 This document is the required entry point for any agent or contributor before touching
 code. It does not replace the formal sources — it routes to them. Read this file and
@@ -189,7 +191,8 @@ with GitHub Actions CI on every push/PR (§6a).
   needs ADR-006's padding.
 - `source.order_refunds` is entirely synthetic demo data (ADR-005) — never present it or
   anything derived from it as observed Olist history.
-- No CLP columns exist yet; BRL ships alone until ADR-007 is implemented (Phase 2D).
+- `mart_daily_commerce.gmv_clp` is the only certified CLP column (ADR-007); it is
+  additive and never replaces `gmv_brl`. No other mart has a CLP column yet.
 
 ## 5. Not implemented yet
 
@@ -199,7 +202,9 @@ with GitHub Actions CI on every push/PR (§6a).
   consumed by a certified metric.
 - Geolocation canonicalization remains separately deferred; no implementation phase is
   assigned yet.
-- BRL->CLP FX conversion (ADR-007 design accepted; implementation deferred to Phase 2D).
+- CLP beyond `mart_daily_commerce.gmv_clp`: `freight_value_clp`, `gross_order_value_clp`,
+  `aov_clp`, and CLP on `mart_daily_category_commerce`/`mart_daily_refunds` (ADR-007,
+  deferred additive follow-up, same pattern).
 - No `mutate_items`/`mutate_payments`/`mutate_products`/`mutate_sellers`-equivalent CLI
   for any of these entities (`generate_refunds.py` doubles as both the refunds demo tool
   and the test fixture generator); incremental-update demos use direct test-only inserts.
@@ -241,8 +246,11 @@ before its first mutation). Bootstraps use small synthetic fixtures
 `--allow-unverified-input`; refunds have no bootstrap fixture since they are purely
 generated), never the full Olist CSVs. `dbt seed` loads the static
 `product_category_name_translation` reference table (ADR-008 — not ingested through
-bootstrap/extract/load since it has no natural key mutation). Verified locally end-to-end
-(the exact CI command sequence, run against local Docker) before being committed.
+bootstrap/extract/load since it has no natural key mutation). `ecom.fetch_fx_rates
+--fixture-dir tests/fixtures/fx` loads deterministic BRL/CLP rate fixtures before the
+baseline build (ADR-007) — CI never calls the live BCB/SII sources. Verified locally
+end-to-end (the exact CI command sequence, run against local Docker) before being
+committed.
 
 ## 6. What to read for a given task
 
@@ -259,6 +267,7 @@ bootstrap/extract/load since it has no natural key mutation). Verified locally e
 | Touch synthetic refunds/`mart_daily_refunds` (Phase 2B) | ADR-005, `src/ecom/generate_refunds.py`, `src/ecom/*_refunds.py`, `dbt/models/gold_candidate/mart_daily_refunds.sql` |
 | Touch `products`/`sellers`/category commerce mart (Phase 2C slice 1) | ADR-008, §7c below, `src/ecom/*_products.py`, `src/ecom/*_sellers.py`, `dbt/models/intermediate/int_order_items_category.sql` |
 | Touch `customers`/`customer_id` vs `customer_unique_id` (Phase 2C slice 2) | ADR-008, §7d below, `src/ecom/*_customers.py`, `dbt/models/silver/stg_customers.sql` |
+| Touch FX/CLP (Phase 2D) | ADR-007, §7e below, `src/ecom/fetch_fx_rates.py`, `dbt/models/intermediate/int_fx_cross_rate.sql` |
 | Investigate a regression | `docs/evidence/*` (historical, read-only) |
 
 Do not infer architecture from filenames alone, and do not re-read the entire repo for a
@@ -275,11 +284,11 @@ narrowly scoped task.
   [ADR-006](adrs/ADR-006-composite-entity-cursor.md), extending ADR-002.
   `source_cursor_key = order_id || ':' || lpad(order_item_id, 4, '0')`; no
   `control.checkpoint`/`control.batch` schema change needed.
-- **BRL->CLP FX source and policy:** accepted (design only) in
+- **BRL->CLP FX source and policy:** accepted in
   [ADR-007](adrs/ADR-007-fx-brl-clp.md): BCB PTAX (BRL/USD, buy+sell average) crossed with
   SII Dólar Observado (CLP/USD) via USD; 7-day max carry-forward for missing days,
-  fails closed beyond that; integer half-up rounding for CLP. Implementation deferred to
-  Phase 2D — BRL ships first.
+  fails closed beyond that; integer half-up rounding for CLP. Implemented for
+  `mart_daily_commerce.gmv_clp` (§7e); other BRL columns/marts remain additive follow-up.
 - Data contracts for `order_items` are accepted and implemented (§2).
 - **Products/sellers dimensions and category commerce mart:** accepted in
   [ADR-008](adrs/ADR-008-category-seller-dimensions.md). Simple single-column keys reuse
@@ -349,11 +358,33 @@ Non-blocking items carried forward:
 
 Both originally scoped Phase 2C slices are now closed.
 
+## 7e. Phase 2D status (BRL->CLP FX, gmv_clp slice) — implemented 2026-10-06
+
+Implemented, tested, and closed for `mart_daily_commerce.gmv_clp`. `ecom.fetch_fx_rates`
+fetches both legs (BCB PTAX, SII Dolar Observado) for a bounded date range into
+`raw_stage.fx_rate_usd_brl`/`fx_rate_usd_clp`; `--fixture-dir` is required for CI/tests
+(no live network dependency in automated runs). `silver.int_fx_cross_rate` resolves a
+7-day-carry-forward cross-rate per `reporting_date`; `assert_fx_rate_resolves_for_
+commerce_dates` fails the build closed when a date cannot resolve on either leg.
+Closure evidence (including a manual fail-closed/recovery reproduction):
+[`docs/evidence/phase2d-closure.md`](evidence/phase2d-closure.md). Non-blocking items
+carried forward:
+
+1. `freight_value_clp`, `gross_order_value_clp`, `aov_clp` do not exist yet — deferred
+   additive follow-up, identical pattern.
+2. `mart_daily_category_commerce` and `mart_daily_refunds` have no CLP columns yet.
+3. No automated pytest test exercises the fail-closed/carry-forward dbt behavior directly
+   (no test in this repo invokes `dbt` from pytest); verified by manual reproduction
+   instead (see closure evidence).
+4. The live BCB/SII fetch path itself is not exercised by any automated test; only
+   `--fixture-dir` is.
+
 ## 8. Recommended next slice
 
-Phase 2D: implement the ADR-007 design (BCB PTAX + SII Dólar Observado ingestion,
-cross-rate, additive CLP columns on the BRL marts). Alternatively, a new
-customer-history or seller-performance slice, pending its own ADR — neither is started.
+Extend CLP to the remaining `mart_daily_commerce` columns and to
+`mart_daily_category_commerce`/`mart_daily_refunds` (ADR-007, additive, same pattern).
+Alternatively, a new customer-history or seller-performance slice, pending its own ADR —
+neither is started.
 
 ## 9. Keeping this file honest
 
