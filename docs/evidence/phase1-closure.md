@@ -4,6 +4,9 @@
 **Closed on:** 2026-09-07
 **Scope:** Orders fulfillment vertical slice described in `SDD.md`, Section 33.
 
+> Historical closure snapshot: results and future-phase statements reflect 2026-09-07.
+> See [`docs/CURRENT_STATE.md`](../CURRENT_STATE.md) for current progress.
+
 ## Reference environment
 
 - macOS 15.7.4; Apple M4; 16 GB RAM.

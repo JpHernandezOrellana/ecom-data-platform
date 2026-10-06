@@ -84,8 +84,8 @@ Olist order_items CSV -> source.order_items (composite cursor, ADR-006)
 - Verified locally end-to-end (exact CI command sequence, fresh Docker volume): unit
   tests, full integration suite (40 tests total across the repo), dbt build baseline+final
   (23/23 each), both products published at baseline and final, final reconciliation
-  passing. GMV spot-check: excludes freight, excludes the `canceled` order's item value
-  (worked example in ADR-005 and `docs/evidence/phase2a-closure.md`).
+  passing. GMV spot-check: excludes freight and excludes the `canceled` order's item value
+  (definitions in ADR-005; worked example in `docs/evidence/phase2a-closure.md`).
 - Closure evidence: [`docs/evidence/phase2a-closure.md`](evidence/phase2a-closure.md).
 - Remaining Phase 2A limitations (non-blocking, carried forward): no `mutate_items`
   equivalent CLI (incremental-update demos use direct test-only inserts); backfill mode
@@ -136,7 +136,7 @@ Olist order_payments CSV -> source.order_payments (composite cursor, ADR-006)
   The intermediate [`phase2b-payments-closure.md`](evidence/phase2b-payments-closure.md)
   is retained as historical record only.
 
-## 3. Latest verification (Phase 1.1 closure, 2026-09-08)
+## 3. Phase 1.1 full-dataset verification snapshot (2026-09-08)
 
 ```text
 pytest tests/            33 passed
@@ -190,7 +190,9 @@ with GitHub Actions CI on every push/PR (§6a).
 
 ## 5. Not implemented yet
 
-- Customers, products, sellers, geolocation (Phase 2C, design not started).
+- Customers, products, and sellers (Phase 2C, design not started).
+- Geolocation canonicalization remains separately deferred; no implementation phase is
+  assigned yet.
 - BRL->CLP FX conversion (ADR-007 design accepted; implementation deferred to Phase 2D).
 - No `mutate_items`/`mutate_payments`-equivalent CLI for either entity (`generate_refunds.py`
   doubles as both the refunds demo tool and the test fixture generator); incremental-
@@ -233,7 +235,7 @@ before being committed.
 | Touch bootstrap/contracts/quarantine | ADR-003, `contracts/source/olist_orders.v1.yaml`, `src/ecom/bootstrap.py`, `src/ecom/contracts.py` |
 | Touch Silver/Gold/metrics | ADR-004, `docs/metrics.md`, `contracts/gold/mart_daily_order_fulfillment.v1.yaml`, `dbt/models/silver/`, `dbt/tests/` |
 | Touch publish/retention | `src/ecom/publish.py`, `src/ecom/retention.py`, ADR-004 §publication |
-| Run or operate the pipeline | `README.md` §Phase 1 runbook |
+| Run or operate the pipeline | `README.md` Phase 1, Phase 2A, and Phase 2B runbooks, as applicable |
 | Touch `order_items`/commerce mart (Phase 2A) | ADR-005, ADR-006, §7a below, `src/ecom/*_items.py`, `dbt/models/intermediate/int_order_commerce.sql` |
 | Touch `order_payments`/reconciliation (Phase 2B) | ADR-005, ADR-006, `src/ecom/*_payments.py`, `dbt/models/intermediate/int_payment_reconciliation.sql` |
 | Touch synthetic refunds/`mart_daily_refunds` (Phase 2B) | ADR-005, `src/ecom/generate_refunds.py`, `src/ecom/*_refunds.py`, `dbt/models/gold_candidate/mart_daily_refunds.sql` |
@@ -300,5 +302,13 @@ Phase 2C: products, sellers, customers. Category/seller analytics models and the
 ## 9. Keeping this file honest
 
 Update this file whenever a phase closes, evidence is refreshed, or an open decision is
-resolved. If this file and the evidence/ADRs disagree, the evidence/ADRs win — fix this
-file, not your assumptions.
+resolved. Precedence depends on the information type:
+
+- this file is authoritative for current progress, the active phase, next work, and open
+  limitations;
+- the accepted SDD, ADRs, contracts, and metric glossary are authoritative for design,
+  interfaces, and semantics;
+- each dated evidence document is authoritative only for the execution it records.
+
+A historical evidence snapshot never determines the current phase. When current progress
+changes, update this file instead of rewriting historical evidence.

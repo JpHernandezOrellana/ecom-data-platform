@@ -131,9 +131,10 @@ Retained as separate diagnostic totals so no information is discarded.
 
 ### Derive refunds from `canceled` status or payment/item mismatch
 
-Rejected. Both signals have multiple non-refund explanations in this dataset (see profiling
-notes referenced from `docs/CURRENT_STATE.md`); treating them as refunds would be inventing
-business semantics not supported by source evidence, which `AGENTS.md` §20 prohibits.
+Rejected. Both signals have multiple non-refund explanations in this dataset (see the
+profiling notes in `contracts/source/olist_order_payments.v1.yaml`); treating them as
+refunds would invent business semantics not supported by source evidence, which
+`AGENTS.md` §20 prohibits.
 
 ### Use `payment_value` as the GMV basis
 

@@ -1,13 +1,17 @@
 # Guia de Implementacion de Fase 1
 
+> Snapshot historico del cierre de Fase 1.1. Describe solo ese slice y no el repositorio
+> completo actual. Para progreso vigente, consulte
+> [`docs/CURRENT_STATE.md`](CURRENT_STATE.md).
+
 **Estado documentado:** Fase 1.1 cerrada
 **Base revisada:** commit `84960ed` y hardening local de Fase 1.1
 **Alcance:** slice vertical de cumplimiento de ordenes
 **Fuente de diseno:** `SDD.md`, ADR-001 a ADR-004, contratos y glosario de metricas
 
-Este documento explica el estado real del codigo de Fase 1. Distingue entre el
-comportamiento implementado, la evidencia de ejecucion registrada y los puntos
-en que el codigo todavia no materializa completamente una regla del diseno.
+Este documento explica el estado del codigo de Fase 1/1.1 al momento de su cierre.
+Distingue entre el comportamiento implementado, la evidencia de ejecucion registrada y
+los puntos que ese slice todavia no materializaba completamente.
 No define metricas ni arquitectura nuevas.
 
 ## 1. Que problema resuelve
@@ -229,25 +233,24 @@ artefactos aceptados. No cambia las metricas ni la arquitectura de Fase 1.
 
 La evidencia reproducible del cierre esta en `docs/evidence/phase1_1-closure.md`.
 
-## 11. Que no existe todavia
+## 11. Exclusiones del slice de Fase 1
 
-Fase 1 no publica GMV, AOV, revenue, reembolsos, montos BRL, montos CLP ni
-conversion FX. Tampoco ingiere items, pagos, clientes, productos, vendedores o
+El slice de Fase 1 no publicaba GMV, AOV, revenue, reembolsos, montos BRL, montos CLP ni
+conversion FX. Tampoco ingeria items, pagos, clientes, productos, vendedores o
 geolocalizacion. No captura hard deletes ni demuestra seguridad ante escrituras
 concurrentes en la fuente.
 
 CI basico ya existe (`.github/workflows/ci.yml`, lint + tests + dbt build sobre fixture
 sintetico). Una CLI de backfill, retencion automatica de candidates, Airflow,
-dashboarding, cloud y componentes distribuidos quedan fuera del slice actual.
+dashboarding, cloud y componentes distribuidos quedaron fuera de ese slice.
 
-## 12. Punto de partida para Fase 2
+## 12. Punto de partida historico para Fase 2
 
-El siguiente paso no es agregar tablas sin definiciones. Primero se deben
-aceptar las semanticas de GMV, AOV, cancelaciones y reembolsos, junto con una
-fuente historica BRL a CLP y su politica para dias sin cotizacion. Luego se
-deben crear contratos y pruebas para `order_items`, que es el siguiente slice
-recomendado porque establece el grano de item necesario para metricas
-monetarias correctas.
+Al cierre de Fase 1.1, el siguiente paso no era agregar tablas sin definiciones. Primero
+debian aceptarse las semanticas de GMV, AOV, cancelaciones y reembolsos, junto con una
+fuente historica BRL a CLP y su politica para dias sin cotizacion. Luego debian crearse
+contratos y pruebas para `order_items`, el slice recomendado en ese momento porque
+establecia el grano de item necesario para metricas monetarias correctas.
 
-Los detalles de progreso y comandos reproducibles se mantienen en
-`docs/evidence/progress-report.md` y `README.md`.
+El progreso vigente se mantiene exclusivamente en `docs/CURRENT_STATE.md`; los comandos
+reproducibles permanecen en `README.md`.

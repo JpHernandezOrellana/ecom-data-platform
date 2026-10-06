@@ -37,7 +37,7 @@ schema:
     required: true
     minimum: 0
 metrics:
-  canonical_glossary: docs/adrs/ADR-005-commerce-metrics.md
+  canonical_glossary: docs/metrics.md
   included:
     - refund_count
     - refunded_amount_brl

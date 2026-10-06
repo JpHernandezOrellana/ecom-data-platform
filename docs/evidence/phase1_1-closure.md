@@ -5,6 +5,9 @@
 **Scope:** Hardening the accepted Phase 1 orders fulfillment slice without changing its
 architecture, grain, or metric semantics.
 
+> Historical closure snapshot: results and future-phase statements reflect 2026-09-08.
+> See [`docs/CURRENT_STATE.md`](../CURRENT_STATE.md) for current progress.
+
 ## Closed alignment gaps
 
 - Bootstrap reads its YAML contract, validates the pinned source checksum, and fails the

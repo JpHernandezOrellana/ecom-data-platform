@@ -12,12 +12,18 @@ The project is a Data Engineering portfolio system designed to demonstrate produ
 When instructions conflict, use this order:
 
 1. explicit current user request;
-2. accepted `SDD.md`;
-3. accepted ADRs;
-4. data contracts / metric definitions;
-5. this `AGENTS.md`;
-6. repository README/task notes;
-7. implementation details.
+2. `docs/CURRENT_STATE.md` for current progress, active phase, next work and open
+   limitations only;
+3. accepted `SDD.md` for architecture and design;
+4. accepted ADRs for scoped decisions;
+5. data contracts / metric definitions for interfaces and business semantics;
+6. this `AGENTS.md`;
+7. repository README/task notes;
+8. implementation details.
+
+Dated evidence is authoritative for the execution it records, not for current project
+progress. `docs/CURRENT_STATE.md` does not override accepted design, decisions, contracts,
+or metric semantics.
 
 Do not silently override a higher-priority artifact.
 

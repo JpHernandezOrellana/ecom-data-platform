@@ -1,13 +1,13 @@
 # Software Design Document (SDD)
 ## Local-First E-commerce Data Platform
 
-**Document version:** 0.2  
+**Document version:** 0.2.1<br>
 **Design status:** Accepted  
-**Implementation authorization:** Phase 1 authorized  
-**Project stage:** Phase 1 closed; Phase 2 design not started
+**Current progress and implementation authorization:** See `docs/CURRENT_STATE.md`<br>
 **Supersedes:** `docs/archive/SDD_v1.md`  
 **Accepted by:** Juan Pablo  
-**Accepted date:** 2026-09-06  
+**Initial accepted date:** 2026-09-06<br>
+**Last synchronized with accepted ADRs:** 2026-10-05<br>
 **Cost objective:** Zero paid infrastructure for the local portfolio release  
 
 ---
@@ -26,7 +26,8 @@ The platform will:
 - load a separate analytical PostgreSQL warehouse;
 - build reusable Silver models and certified Gold marts with dbt;
 - expose business dates in the Chilean reporting timezone;
-- expose monetary metrics in Chilean pesos when monetary entities are introduced;
+- expose source-currency BRL metrics first and add Chilean-peso reporting in the
+  separately gated FX phase;
 - support replay, idempotent reruns, controlled failure, and traceable run metadata.
 
 The first implementation is intentionally narrow. Phase 1 proves one complete order-fulfillment path before adding sales, payments, products, orchestration, cloud services, or agent access.
@@ -195,7 +196,7 @@ The deterministic source simulator and incremental extraction do not write the s
 
 Phase 1 uses the complete orders file of approximately 99,441 rows plus small deterministic mutation batches. This volume is intentionally suitable for PostgreSQL, Python batch extraction, Parquet, and dbt on one machine.
 
-The performance reference environment allocates at least 4 logical CPU cores, 8 GB RAM, and 10 GB free SSD storage to the local project services. The README records the actual environment used for acceptance evidence.
+The performance reference environment allocates at least 4 logical CPU cores, 8 GB RAM, and 10 GB free SSD storage to the local project services. The dated closure evidence records the actual environment used for acceptance.
 
 ## 7.5 Local service objectives
 
@@ -803,7 +804,8 @@ Olist monetary values are treated as BRL based on the Brazilian marketplace cont
 
 ## 20.3 Chilean reporting currency
 
-When monetary entities enter Phase 2, certified consumer marts expose CLP separately from original BRL amounts.
+Phase 2A/2B certified consumer marts expose source-currency BRL amounts. Phase 2D adds CLP
+columns separately under ADR-007; CLP never silently replaces the original BRL amounts.
 
 The conversion contract must preserve:
 
@@ -816,9 +818,13 @@ The conversion contract must preserve:
 - retrieval timestamp;
 - conversion policy version.
 
-The rate date is based on the purchase date under `America/Sao_Paulo`, unless the Phase 2 metric ADR selects another accounting policy. CLP presentation amounts round to whole pesos using an explicitly tested decimal rounding mode.
+The rate date is the order's `reporting_date` (purchase-date cohort in
+`America/Santiago`), as selected by ADR-007. CLP presentation amounts round to whole pesos
+using decimal half-up rounding.
 
-No BRL and CLP values may be added in one metric without explicit conversion. Selecting and validating the authoritative historical FX source is a Phase 2 gate and does not block the orders-only Phase 1.
+No BRL and CLP values may be added in one metric without explicit conversion. ADR-007
+selects BCB PTAX and SII Dólar Observado as the authoritative sources and defines the
+missing-day policy; implementing and validating that design remains a Phase 2D gate.
 
 ---
 
@@ -1263,7 +1269,7 @@ The procedure completed on 2026-09-06. This canonical `SDD.md` is authoritative 
 | Known lifecycle inconsistencies exist | Naive hard tests would reject real historical data | Preserve, flag, quantify, and exclude only where metric eligibility requires |
 | Full dataset is externally hosted | Clean run may require source access and Kaggle terms | Manifest, download instructions, checksums, synthetic test fixtures |
 | Local disk loss can remove Bronze and control state | Infrastructure-level data loss | Reproducible bootstrap; production disaster recovery is outside MVP |
-| Future FX source is not yet selected | CLP monetary marts cannot be certified | Make authoritative FX selection a Phase 2 gate |
+| Accepted FX design is not yet implemented or source-validated | CLP monetary marts cannot yet be certified | Implement and test ADR-007 in Phase 2D; keep existing marts BRL-only |
 | Scope expansion delays working evidence | Portfolio remains documentation-only | Enforce vertical-slice phase gates |
 
 Portfolio reliability targets for representative Phase 1 runs are:
@@ -1354,7 +1360,9 @@ Phase 0 is complete only when:
 9. There are no unresolved decisions that block the orders-only vertical slice.
 10. The README clearly states current status and does not claim unimplemented behavior.
 
-Phase 0 acceptance authorizes only Phase 1. It does not authorize monetary marts until the Phase 2 FX gate is resolved.
+The original Phase 0 acceptance authorized only Phase 1. The monetary-definition and FX
+design gates were later resolved by ADR-005 and ADR-007; current implementation
+authorization is recorded only in `docs/CURRENT_STATE.md`.
 
 ---
 
@@ -1441,4 +1449,7 @@ SDD version 0.2 is Accepted.
 Phase 1 implementation is authorized.
 ```
 
-Phase 0 artifacts were explicitly approved by Juan Pablo and promoted on 2026-09-06. Material changes now require the governance process in Section 31.
+Phase 0 artifacts were explicitly approved by Juan Pablo and promoted on 2026-09-06.
+Version 0.2.1 synchronizes the canonical SDD with the already accepted ADR-005/006/007 and
+removes mutable progress metadata; it introduces no new architecture or business semantics.
+Material changes still require the governance process in Section 31.

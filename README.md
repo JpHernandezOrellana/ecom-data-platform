@@ -6,12 +6,9 @@ A portfolio Data Engineering project designed to demonstrate reliable incrementa
 
 > **Start here:** [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md) — current state, invariants, open decisions, and task-specific reading map for any agent or contributor.
 
-**Phase:** Phase 1.1 closed (orders fulfillment); Phase 2A closed (order items + BRL
-commerce mart); Phase 2B closed (order payments + synthetic refunds)
-**Design status:** Accepted on 2026-09-06; Phase 2A/2B design (ADR-005/006/007) accepted on 2026-10-04
-**Implementation status:** Phase 1 accepted on 2026-09-07; Phase 1.1 closed locally on
-2026-09-08; Phase 2A closed locally on 2026-10-05; Phase 2B closed locally on 2026-10-05
-**Implementation authorization:** Phase 1 authorized; Phase 2A and 2B authorized and closed
+For the authoritative current phase, completed slices, implementation authorization, and
+next work, see [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md). This README intentionally
+does not duplicate mutable progress metadata.
 
 Phase 1 delivers: Docker Compose with source + warehouse PostgreSQL, deterministic Olist
 bootstrap (99,441 orders), bounded `(source_updated_at, order_id)` extraction, Parquet
@@ -93,7 +90,7 @@ The project does not relabel Brazilian values as Chilean data.
 - Naive historical timestamps are interpreted under the documented `America/Sao_Paulo` assumption.
 - Canonical instants are stored in UTC.
 - Consumer reporting dates use `America/Santiago`.
-- Monetary reporting in CLP begins in Phase 2 only after an authoritative historical FX source and conversion policy are accepted.
+- CLP reporting is deferred to Phase 2D under ADR-007; Phase 2A/2B marts remain BRL-only.
 
 Phase 1 contains no monetary metrics.
 
@@ -125,15 +122,15 @@ Phase 1 contains no monetary metrics.
 | [`ADR-005`](docs/adrs/ADR-005-commerce-metrics.md) | GMV, AOV, freight, cancellations, refunds | Accepted |
 | [`ADR-006`](docs/adrs/ADR-006-composite-entity-cursor.md) | Composite-key cursor for `order_items` | Accepted |
 | [`ADR-007`](docs/adrs/ADR-007-fx-brl-clp.md) | BRL-to-CLP FX source and conversion policy | Accepted (design; CLP implementation deferred) |
-| [`Metric glossary`](docs/metrics.md) | Canonical Phase 1 metric semantics | Accepted |
+| [`Metric glossary`](docs/metrics.md) | Canonical certified-mart metric semantics | Accepted |
 | [`Test matrix`](docs/testing/phase1-test-matrix.md) | Required Phase 1 verification | Accepted |
 | [`Phase 1 closure evidence`](docs/evidence/phase1-closure.md) | Acceptance results and layer reconciliation | Closed |
 | [`Phase 1.1 closure evidence`](docs/evidence/phase1_1-closure.md) | Design-alignment hardening results | Closed |
 | [`Phase 2A closure evidence`](docs/evidence/phase2a-closure.md) | Order items + BRL commerce results | Closed |
 | [`Phase 2B closure evidence`](docs/evidence/phase2b-closure.md) | Order payments ingestion + synthetic refunds results | Closed |
 | [`Phase 2B payments evidence (historical)`](docs/evidence/phase2b-payments-closure.md) | Intermediate payments-only closure, superseded above | Historical |
-| [`Progress report`](docs/evidence/progress-report.md) | Current phase, verification, and next-phase gates | Current |
-| [`Phase 1 implementation guide`](docs/phase1-implementation-guide.md) | Current code, decisions, evidence, and alignment status | Current |
+| [`Historical progress report`](docs/evidence/progress-report.md) | Snapshot at Phase 1.1 closure | Historical |
+| [`Phase 1 implementation guide`](docs/phase1-implementation-guide.md) | Historical Phase 1/1.1 implementation snapshot | Historical |
 | [`Olist bootstrap contract`](contracts/source/olist_orders.v1.yaml) | Historical CSV boundary | Accepted |
 | [`Operational orders contract`](contracts/source/operational_orders.v1.yaml) | Incremental PostgreSQL boundary | Accepted |
 | [`Gold contract`](contracts/gold/mart_daily_order_fulfillment.v1.yaml) | Certified consumer product | Accepted |
@@ -251,10 +248,10 @@ Gold products, integration tests — including the `order_items`/`order_payments
 `order_refunds` vertical slices — and final
 reconciliation) against two ephemeral PostgreSQL containers using the repository's
 `compose.yaml`. CI bootstraps from small synthetic fixtures
-(`tests/fixtures/orders_small.csv`, `tests/fixtures/order_items_small.csv`), never the
-full Olist CSVs.
+(`tests/fixtures/orders_small.csv`, `tests/fixtures/order_items_small.csv`,
+`tests/fixtures/order_payments_small.csv`), never the full Olist CSVs.
 
 ## Next steps
 
-- Keep CI and contract-validation automation local and reproducible.
-- Expand to Phase 2 entities (order items + FX-gated CLP reporting).
+See [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md) for the authoritative next slice and
+its entry conditions.

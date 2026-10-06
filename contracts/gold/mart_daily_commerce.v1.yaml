@@ -65,7 +65,7 @@ schema:
     minimum: 0
     semantics: sum(price) for items on orders whose latest status is unavailable. Diagnostic only, excluded from gmv_brl.
 metrics:
-  canonical_glossary: docs/adrs/ADR-005-commerce-metrics.md
+  canonical_glossary: docs/metrics.md
   included:
     - eligible_order_count
     - gmv_brl
@@ -123,8 +123,8 @@ consumers:
   - portfolio_reviewer
 known_limitations:
   - BRL only; CLP conversion is deferred to Phase 2D (ADR-007).
-  - gmv_brl is gross of unobserved refunds; refunds are reported separately once the
-    Phase 2B synthetic refund source exists (ADR-005), never netted here.
-- An order_item referencing an order_id absent from stg_orders fails the dbt build
-  (GOLD-COM-ORPHAN-001) rather than being quarantined row-by-row; recovering from this
-  requires fixing upstream extraction/bootstrap ordering, not editing this mart.
+  - gmv_brl is gross of unobserved real-world refunds; synthetic demo refunds are reported
+    separately in mart_daily_refunds (ADR-005), never netted here.
+  - An order_item referencing an order_id absent from stg_orders fails the dbt build
+    (GOLD-COM-ORPHAN-001) rather than being quarantined row-by-row; recovering from this
+    requires fixing upstream extraction/bootstrap ordering, not editing this mart.

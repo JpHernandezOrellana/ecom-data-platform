@@ -55,7 +55,7 @@ semantics.
 
 If no rate is published for that exact calendar date on either leg (weekends, Chilean or
 Brazilian holidays), the policy is: **carry forward the most recent prior published rate,
-up to a maximum of 7 calendar days back.** If both legs have no rate within 7 days, the
+up to a maximum of 7 calendar days back.** If either leg has no rate within 7 days, the
 row is **not silently defaulted** — it fails the FX-dependent model closed, consistent with
 `AGENTS.md` §6.8 (no silent loss) and must be surfaced as a quarantined/flagged row, not a
 zero or null CLP value slipped into an otherwise-complete mart.

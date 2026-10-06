@@ -1,16 +1,17 @@
 # Metric Glossary
 
-**Version:** 1.0.0  
+**Version:** 1.1.0<br>
 **Status:** Accepted  
 **Owner:** Juan Pablo  
 **Accepted by:** Juan Pablo  
-**Accepted date:** 2026-09-06  
-**Applies to:** Phase 1 `mart_daily_order_fulfillment`  
-**Related SDD:** `SDD.md`, Sections 18-20  
+**Initial accepted date:** 2026-09-06<br>
+**Last synchronized:** 2026-10-05<br>
+**Applies to:** `mart_daily_order_fulfillment`, `mart_daily_commerce`, and `mart_daily_refunds`<br>
+**Related design:** `SDD.md`, Sections 18-20; ADR-004; ADR-005<br>
 
 ## Shared semantics
 
-### Mart grain
+### Fulfillment mart grain
 
 One row represents one order purchase-date cohort in `America/Santiago`.
 
@@ -28,7 +29,7 @@ An order that passed the applicable bootstrap and operational ingestion contract
 
 Known business-quality flags do not remove an order from `order_count`. Individual outcome metrics apply their own eligibility rules.
 
-## Metrics
+## Fulfillment metrics
 
 ### Order count
 
@@ -148,9 +149,9 @@ olist purchase text
 
 Changing the timezone or date role is a breaking metric change.
 
-## Phase 1 exclusions
+## Fulfillment mart exclusions
 
-Phase 1 does not define or publish:
+`mart_daily_order_fulfillment` does not define or publish:
 
 - GMV;
 - revenue;
@@ -161,11 +162,124 @@ Phase 1 does not define or publish:
 - BRL-to-CLP conversion;
 - product, seller, customer, or geographic metrics.
 
-These require additional source entities and accepted Phase 2 definitions. Payment value, item value, and accounting revenue are not assumed to be interchangeable.
+These do not belong to the fulfillment mart's grain. Payment value, item value, and
+accounting revenue are not assumed to be interchangeable.
+
+## Commerce mart semantics
+
+### Commerce mart grain
+
+`gold.mart_daily_commerce` has one row per order purchase-date cohort in
+`America/Santiago`. It uses the same `reporting_date` derivation as
+`mart_daily_order_fulfillment`.
+
+All commerce amounts are source-currency BRL. CLP columns do not exist in this mart yet;
+their additive implementation is deferred to Phase 2D under ADR-007.
+
+An order is eligible for canonical commerce metrics when its latest known status is
+neither `canceled` nor `unavailable` and it has at least one item. Excluded item values
+remain visible in separate diagnostic metrics.
+
+### Eligible order count
+
+**Column:** `eligible_order_count`<br>
+**Definition:** Count of distinct eligible `order_id` values with at least one item.<br>
+**Exclusion:** Orders whose latest status is `canceled` or `unavailable`.<br>
+
+### GMV
+
+**Column:** `gmv_brl`<br>
+**Definition:** Sum of `order_items.price` over eligible orders.<br>
+**Currency/type:** BRL fixed-precision decimal.<br>
+**Exclusions:** Freight, canceled orders, unavailable orders, and refunds.<br>
+**Naming:** GMV is never relabeled as revenue.<br>
+
+```text
+sum(order_items.price) over eligible orders
+```
+
+### Freight value
+
+**Column:** `freight_value_brl`<br>
+**Definition:** Sum of `order_items.freight_value` over eligible orders.<br>
+**Relationship to GMV:** Reported separately and never included in `gmv_brl`.<br>
+
+### Gross order value
+
+**Column:** `gross_order_value_brl`<br>
+**Definition:** Merchandise GMV plus freight over the same eligible order set.<br>
+**Naming:** Never called revenue.<br>
+
+```text
+gmv_brl + freight_value_brl
+```
+
+### Average order value
+
+**Column:** `aov_brl`<br>
+**Definition:** GMV divided by distinct eligible orders with at least one item.<br>
+**Zero denominator:** Null.<br>
+
+```text
+gmv_brl / eligible_order_count
+```
+
+### Excluded item values
+
+**Columns:** `canceled_item_value_brl`, `unavailable_item_value_brl`<br>
+**Definition:** Sum of item price for orders whose latest status is respectively
+`canceled` or `unavailable`.<br>
+**Purpose:** Diagnostic visibility; both values are excluded from canonical `gmv_brl`.<br>
+
+## Refund mart semantics
+
+### Synthetic-source warning
+
+Olist contains no refund event signal. Every row underlying
+`gold.mart_daily_refunds` is generated synthetic demo data, not observed Olist history.
+Synthetic refunds must remain labeled as such in contracts, models, evidence, and
+consumer-facing descriptions.
+
+### Refund mart grain
+
+`gold.mart_daily_refunds` has one row per refund-date cohort. `reporting_date` is the
+calendar date of `refunded_at` in `America/Santiago`, not the original order's purchase
+date.
+
+The refund and commerce marts therefore have different date roles. They must not be
+merged by date without an explicit consumer join and an explicit interpretation of that
+join.
+
+### Refund count
+
+**Column:** `refund_count`<br>
+**Definition:** Count of synthetic refund events in the refund-date cohort.<br>
+**Null behavior:** Not nullable and non-negative.<br>
+
+### Refunded amount
+
+**Column:** `refunded_amount_brl`<br>
+**Definition:** Sum of synthetic `refunded_amount` values in the refund-date cohort.<br>
+**Currency/type:** BRL fixed-precision decimal.<br>
+**Constraint:** A refund may not exceed the referenced payment value.<br>
+
+### Relationship to commerce GMV
+
+`mart_daily_commerce.gmv_brl` is never reduced by `refunded_amount_brl`. A consumer that
+needs a net payment view must compute it explicitly in a payments-grained context; that
+result is not a replacement for GMV.
+
+## Payment reconciliation
+
+`silver.int_payment_reconciliation` is diagnostic only. `order_payments.payment_value`
+may be compared with item price plus freight, but it is never the authority for GMV and a
+disagreement is not interpreted as a refund.
 
 ## Change policy
 
-A change to grain, status eligibility, denominator, timestamp interpretation, date role, duration unit, or quality-flag inclusion requires:
+A change to grain, status eligibility, denominator, formula, timestamp interpretation,
+date role, duration unit, currency treatment, synthetic-source labeling, or quality-flag
+inclusion requires:
 
 - a new metric version;
 - a synchronized Gold contract update;

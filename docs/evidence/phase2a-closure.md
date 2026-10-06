@@ -7,6 +7,9 @@
 ADR-006, and ADR-007 (ADR-007's CLP implementation is explicitly deferred to Phase 2D and
 is out of scope here).
 
+> Historical closure snapshot: results and future-phase statements reflect the Phase 2A
+> close. See [`docs/CURRENT_STATE.md`](../CURRENT_STATE.md) for current progress.
+
 ## Closed scope
 
 - `contracts/source/olist_order_items.v1.yaml`, `operational_order_items.v1.yaml`, and
