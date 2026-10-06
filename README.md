@@ -36,8 +36,10 @@ remains deferred pending its own ADR. Phase 2D implements ADR-007's BRL->CLP des
 `mart_daily_commerce.gmv_clp`: `ecom.fetch_fx_rates` pulls BCB PTAX and SII Dolar
 Observado rates for a bounded date range, and `silver.int_fx_cross_rate` resolves a
 7-day-carry-forward cross-rate per date, failing the build closed when a date cannot
-resolve. Verified locally end-to-end against synthetic fixtures; not yet run against the
-full Olist dataset.
+resolve. One Airflow DAG (`ecom_pipeline`, ADR-009) now orchestrates every
+extract/load/dbt/publish stage, wrapping the existing CLI commands without any new
+transformation logic. Verified locally end-to-end against synthetic fixtures; not yet
+run against the full Olist dataset.
 
 Phase 1 closure evidence is in [`docs/evidence/phase1-closure.md`](docs/evidence/phase1-closure.md).
 Phase 1.1 hardening evidence is in
@@ -52,6 +54,8 @@ Phase 2C slice 2 closure evidence is in
 [`docs/evidence/phase2c-slice2-closure.md`](docs/evidence/phase2c-slice2-closure.md).
 Phase 2D closure evidence is in
 [`docs/evidence/phase2d-closure.md`](docs/evidence/phase2d-closure.md).
+Airflow orchestration closure evidence is in
+[`docs/evidence/airflow-orchestration-closure.md`](docs/evidence/airflow-orchestration-closure.md).
 
 ## Business problem
 
@@ -140,6 +144,7 @@ Phase 1 contains no monetary metrics.
 | [`ADR-006`](docs/adrs/ADR-006-composite-entity-cursor.md) | Composite-key cursor for `order_items` | Accepted |
 | [`ADR-007`](docs/adrs/ADR-007-fx-brl-clp.md) | BRL-to-CLP FX source and conversion policy | Accepted (implemented for gmv_clp) |
 | [`ADR-008`](docs/adrs/ADR-008-category-seller-dimensions.md) | Products/sellers dimensions and category commerce mart | Accepted |
+| [`ADR-009`](docs/adrs/ADR-009-airflow-orchestration.md) | Airflow orchestration of existing pipeline stages | Accepted |
 | [`Metric glossary`](docs/metrics.md) | Canonical certified-mart metric semantics | Accepted |
 | [`Test matrix`](docs/testing/phase1-test-matrix.md) | Required Phase 1 verification | Accepted |
 | [`Phase 1 closure evidence`](docs/evidence/phase1-closure.md) | Acceptance results and layer reconciliation | Closed |
@@ -171,13 +176,15 @@ Phase 1 contains no monetary metrics.
 | [`FX usd_brl rate contract`](contracts/source/fx_rate_usd_brl.v1.yaml) | External BCB PTAX reference boundary (Phase 2D) | Accepted |
 | [`FX usd_clp rate contract`](contracts/source/fx_rate_usd_clp.v1.yaml) | External SII Dolar Observado reference boundary (Phase 2D) | Accepted |
 | [`Phase 2D closure evidence`](docs/evidence/phase2d-closure.md) | gmv_clp implementation + fail-closed verification | Closed |
+| [`Airflow orchestration closure evidence`](docs/evidence/airflow-orchestration-closure.md) | ecom_pipeline DAG end-to-end verification | Closed |
 
 ## Deliberate scope
 
 Phase 1 contains one complete orders vertical slice. Phase 2A adds `order_items` + BRL
 GMV/AOV. Phase 2B adds `order_payments` + synthetic refunds. Phase 2C adds
-`products`/`sellers`/`customers` dimensions + category commerce breakdown. All
-deliberately exclude:
+`products`/`sellers`/`customers` dimensions + category commerce breakdown. Airflow
+orchestration (ADR-009) wraps these existing stages in one manually-triggerable DAG. All
+of the following remain deliberately excluded:
 
 - any new-vs-returning-customer metric (`customers` is ingested and the `customer_id`
   vs `customer_unique_id` distinction is exposed, but no metric is defined on it — that
@@ -187,7 +194,6 @@ deliberately exclude:
   never netted against `mart_daily_refunds`; a reader computes any net view explicitly);
 - CLP beyond `mart_daily_commerce.gmv_clp` (Phase 2D, ADR-007; freight/gross/AOV in CLP
   and CLP on the category/refunds marts are additive follow-ups, not yet implemented);
-- Airflow;
 - dashboarding;
 - cloud infrastructure;
 - CDC and streaming;
@@ -333,6 +339,30 @@ network call with `--fixture-dir`). `silver.int_fx_cross_rate` resolves a BRL/CL
 cross-rate per `mart_daily_commerce` cohort date, carrying forward up to 7 calendar days
 per leg; a date that cannot resolve on either leg fails the dbt build closed
 (`assert_fx_rate_resolves_for_commerce_dates`), per ADR-007.
+
+## Airflow runbook (ecom_pipeline)
+
+Run after bootstrapping at least `orders` and creating the source reader (Phase 1
+runbook above):
+
+```bash
+docker compose up -d --wait source-postgres warehouse-postgres
+docker compose build airflow
+docker compose up -d airflow
+# wait for the scheduler, then:
+docker compose exec airflow airflow dags unpause ecom_pipeline
+docker compose exec airflow airflow dags trigger ecom_pipeline
+docker compose exec airflow airflow tasks states-for-dag-run ecom_pipeline <run_id>
+```
+
+`ecom_pipeline` orchestrates `extract_<entity> -> load_<entity>` for every entity
+(parallel across entities), `fetch_fx_rates`, one shared `dbt seed`/`dbt build`, and four
+independent `publish_*` tasks — every task is a thin wrapper around the exact CLI
+commands in the runbooks above (ADR-009). It does **not** orchestrate bootstrap, the
+source-reader setup script, `ecom.mutate`/`ecom.generate_refunds`, or `ecom.retention`
+(run those separately, as today). `fetch_fx_rates`'s default window is the last 14 days
+relative to the DAG's logical date; against the historical demo fixtures, fetch that
+range directly first (see `docs/evidence/airflow-orchestration-closure.md`).
 
 ## Continuous integration
 

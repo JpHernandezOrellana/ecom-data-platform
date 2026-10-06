@@ -1,14 +1,17 @@
 # Current Project State
 
 **Last updated:** 2026-10-05
-**Current phase:** Phase 2D implemented for `mart_daily_commerce.gmv_clp` (BRL->CLP FX,
-ADR-007; evidence: `docs/evidence/phase2d-closure.md`). Phase 2C fully closed (slice 1:
-products + sellers + `mart_daily_category_commerce`, evidence:
-`docs/evidence/phase2c-closure.md`; slice 2: `customers` dimension, evidence:
-`docs/evidence/phase2c-slice2-closure.md`)
+**Current phase:** Airflow orchestration implemented (ADR-009; evidence:
+`docs/evidence/airflow-orchestration-closure.md`) — one DAG (`ecom_pipeline`) now runs
+every extract/load/dbt/publish stage. Phase 2D implemented for
+`mart_daily_commerce.gmv_clp` (BRL->CLP FX, ADR-007; evidence:
+`docs/evidence/phase2d-closure.md`). Phase 2C fully closed (slice 1: products + sellers +
+`mart_daily_category_commerce`, evidence: `docs/evidence/phase2c-closure.md`; slice 2:
+`customers` dimension, evidence: `docs/evidence/phase2c-slice2-closure.md`)
 **Next phase:** Extend CLP to `freight_value_clp`/`gross_order_value_clp`/`aov_clp` and
-to `mart_daily_category_commerce`/`mart_daily_refunds` (same pattern, additive), or a new,
-separately ADR'd customer-history/seller-performance slice
+to `mart_daily_category_commerce`/`mart_daily_refunds` (same pattern, additive), add
+`ecom.retention` to the DAG or a scheduled cadence, or a new, separately ADR'd
+customer-history/seller-performance slice
 
 This document is the required entry point for any agent or contributor before touching
 code. It does not replace the formal sources — it routes to them. Read this file and
@@ -210,7 +213,8 @@ with GitHub Actions CI on every push/PR (§6a).
   and the test fixture generator); incremental-update demos use direct test-only inserts.
 - Concurrent-write guarantees during extraction; hard-delete capture (unchanged from
   Phase 1, applies to every entity ingested so far).
-- Airflow, dashboard, cloud infra, CDC, distributed processing, agent/MCP write access.
+- `ecom.retention` is not part of the Airflow DAG (deliberately, ADR-009); dashboard,
+  cloud infra, CDC, distributed processing, agent/MCP write access.
 
 CI (`.github/workflows/ci.yml`) now exercises `orders`, `order_items`, `order_payments`,
 `order_refunds`, `products`, `sellers`, and `customers` against synthetic fixtures,
@@ -268,6 +272,7 @@ committed.
 | Touch `products`/`sellers`/category commerce mart (Phase 2C slice 1) | ADR-008, §7c below, `src/ecom/*_products.py`, `src/ecom/*_sellers.py`, `dbt/models/intermediate/int_order_items_category.sql` |
 | Touch `customers`/`customer_id` vs `customer_unique_id` (Phase 2C slice 2) | ADR-008, §7d below, `src/ecom/*_customers.py`, `dbt/models/silver/stg_customers.sql` |
 | Touch FX/CLP (Phase 2D) | ADR-007, §7e below, `src/ecom/fetch_fx_rates.py`, `dbt/models/intermediate/int_fx_cross_rate.sql` |
+| Touch Airflow orchestration | ADR-009, §7f below, `dags/ecom_pipeline.py`, `docker/airflow/Dockerfile`, `compose.yaml` |
 | Investigate a regression | `docs/evidence/*` (historical, read-only) |
 
 Do not infer architecture from filenames alone, and do not re-read the entire repo for a
@@ -286,9 +291,15 @@ narrowly scoped task.
   `control.checkpoint`/`control.batch` schema change needed.
 - **BRL->CLP FX source and policy:** accepted in
   [ADR-007](adrs/ADR-007-fx-brl-clp.md): BCB PTAX (BRL/USD, buy+sell average) crossed with
-  SII Dólar Observado (CLP/USD) via USD; 7-day max carry-forward for missing days,
+  SII Dólar   Observado (CLP/USD) via USD; 7-day max carry-forward for missing days,
   fails closed beyond that; integer half-up rounding for CLP. Implemented for
   `mart_daily_commerce.gmv_clp` (§7e); other BRL columns/marts remain additive follow-up.
+- **Airflow orchestration:** accepted in
+  [ADR-009](adrs/ADR-009-airflow-orchestration.md). One DAG (`ecom_pipeline`) wraps
+  existing CLI commands only — extract/load per entity, `fetch_fx_rates`, shared
+  `dbt seed`/`dbt build`, four independent `publish_*` tasks. `SequentialExecutor` +
+  SQLite, manually triggerable. Does not orchestrate bootstrap, the source-reader setup
+  script, demo generators, or `ecom.retention` (§7f).
 - Data contracts for `order_items` are accepted and implemented (§2).
 - **Products/sellers dimensions and category commerce mart:** accepted in
   [ADR-008](adrs/ADR-008-category-seller-dimensions.md). Simple single-column keys reuse
@@ -379,12 +390,33 @@ carried forward:
 4. The live BCB/SII fetch path itself is not exercised by any automated test; only
    `--fixture-dir` is.
 
+## 7f. Airflow orchestration status — implemented 2026-10-06
+
+Implemented and verified by actually triggering the DAG (not just inspecting its static
+structure). `dags/ecom_pipeline.py` orchestrates `extract_<entity> >> load_<entity>` for
+all seven entities (parallel across entities) plus `fetch_fx_rates`, feeding one shared
+`dbt_seed`+`dbt_build` (`trigger_rule=all_success`), fanning out to four independent
+`publish_*` tasks. Closure evidence, including a real bug found and fixed during
+verification (`dbt/profiles.yml` hardcoded `host: localhost`, never read `WAREHOUSE_DSN`):
+[`docs/evidence/airflow-orchestration-closure.md`](evidence/airflow-orchestration-closure.md).
+Non-blocking items carried forward:
+
+1. Not exercised by CI (`.github/workflows/ci.yml` still runs commands directly) —
+   explicitly out of scope per ADR-009.
+2. `ecom.retention` is not part of this DAG (deliberately).
+3. `SequentialExecutor`/SQLite is a local/dev configuration, not production Airflow.
+4. The DAG's default `fetch_fx_rates` window (`ds-14` to `ds`) only resolves CLP for
+   orders purchased recently; running it against the historical demo fixtures requires
+   fetching that specific historical range separately first (not a DAG defect — this is
+   the same fail-closed behavior from ADR-007/Phase 2D, now confirmed to propagate
+   correctly through Airflow's `trigger_rule=all_success`).
+
 ## 8. Recommended next slice
 
 Extend CLP to the remaining `mart_daily_commerce` columns and to
 `mart_daily_category_commerce`/`mart_daily_refunds` (ADR-007, additive, same pattern).
-Alternatively, a new customer-history or seller-performance slice, pending its own ADR —
-neither is started.
+Alternatively, add `ecom.retention` to a schedule, or a new customer-history or
+seller-performance slice, pending its own ADR — none of these is started.
 
 ## 9. Keeping this file honest
 

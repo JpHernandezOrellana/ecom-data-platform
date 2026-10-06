@@ -1206,7 +1206,9 @@ Force a required Gold test to fail and prove the previously certified Gold outpu
 
 Airflow is not part of Phase 1. Each pipeline stage must first exist as an independently executable and tested command.
 
-When Phase 2 has multiple stable dependent stages, one Airflow DAG may orchestrate:
+When Phase 2 has multiple stable dependent stages, one Airflow DAG may orchestrate. This
+condition is now met; see ADR-009 and `docs/evidence/airflow-orchestration-closure.md`
+for the implemented DAG, which follows the exact shape below:
 
 ```text
 extract and commit entities
@@ -1344,7 +1346,12 @@ Phase 2D). Sub-phases, in order:
   date cannot resolve (ADR-007). `mart_daily_commerce.gmv_clp` is the first and so far
   only certified CLP column; other BRL columns and other marts remain additive follow-up
   work. Evidence: `docs/evidence/phase2d-closure.md`.
-- Airflow after tasks work independently (unchanged).
+- **Airflow orchestration (implemented, 2026-10-06, ADR-009):** per §30's own gate
+  ("when Phase 2 has multiple stable dependent stages"), one DAG (`ecom_pipeline`) now
+  orchestrates `extract_<entity> -> load_<entity>` for every entity, `fetch_fx_rates`, a
+  shared `dbt seed`/`dbt build`, and all four `publish_*` targets — wrapping existing CLI
+  commands only, with no new transformation logic (§30). Evidence:
+  `docs/evidence/airflow-orchestration-closure.md`.
 
 ## Phase 3 - Engineering maturity
 
