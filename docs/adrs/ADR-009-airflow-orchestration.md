@@ -178,7 +178,7 @@ Costs and limitations:
   window against intentionally historical demo data; verifying this DAG with the
   provided fixtures requires fetching rates for the fixtures' actual date range
   (`tests/fixtures/fx`'s 2017-01-01..2018-02-01), not the DAG's default production
-  window. Full evidence: `docs/evidence/phase2e-closure.md`.
+  window. Full evidence: `docs/evidence/airflow-orchestration-closure.md`.
 - The Airflow webserver's gunicorn worker repeatedly reimported heavyweight optional
   provider packages (e.g. `apache-airflow-providers-google`'s Azure Synapse models) on
   worker (re)start, producing noisy but harmless `SyntaxWarning` log spam. This did not

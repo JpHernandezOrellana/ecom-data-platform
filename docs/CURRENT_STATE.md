@@ -1,6 +1,6 @@
 # Current Project State
 
-**Last updated:** 2026-10-05
+**Last updated:** 2026-10-06
 **Current phase:** Airflow orchestration implemented (ADR-009; evidence:
 `docs/evidence/airflow-orchestration-closure.md`) — one DAG (`ecom_pipeline`) now runs
 every extract/load/dbt/publish stage. Phase 2D implemented for
