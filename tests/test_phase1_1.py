@@ -68,7 +68,9 @@ def test_loader_rejects_manifest_count_mismatch(tmp_path):
 def _write_dbt_artifacts(base: Path, test_status: str = "pass") -> tuple[Path, Path]:
     model_id = "model.ecom_orders.mart_daily_order_fulfillment"
     test_id = "test.ecom_orders.assert_fulfillment_mart_metric_rules"
+    invocation_id = "test-invocation"
     manifest = {
+        "metadata": {"invocation_id": invocation_id},
         "nodes": {
             model_id: {
                 "resource_type": "model",
@@ -79,13 +81,14 @@ def _write_dbt_artifacts(base: Path, test_status: str = "pass") -> tuple[Path, P
                 "resource_type": "test",
                 "depends_on": {"nodes": [model_id]},
             },
-        }
+        },
     }
     results = {
+        "metadata": {"invocation_id": invocation_id},
         "results": [
             {"unique_id": model_id, "status": "success"},
             {"unique_id": test_id, "status": test_status},
-        ]
+        ],
     }
     manifest_path = base / "manifest.json"
     results_path = base / "run_results.json"
@@ -102,6 +105,17 @@ def test_publication_requires_passing_artifacts_for_the_requested_candidate(tmp_
 def test_publication_rejects_failed_candidate_test(tmp_path):
     results_path, manifest_path = _write_dbt_artifacts(tmp_path, test_status="fail")
     with pytest.raises(ValueError, match="tests did not pass"):
+        _verify_dbt_candidate(
+            "mart_daily_order_fulfillment", "phase1_1", results_path, manifest_path
+        )
+
+
+def test_publication_rejects_artifacts_from_different_invocations(tmp_path):
+    results_path, manifest_path = _write_dbt_artifacts(tmp_path)
+    results = json.loads(results_path.read_text())
+    results["metadata"]["invocation_id"] = "different-invocation"
+    results_path.write_text(json.dumps(results))
+    with pytest.raises(ValueError, match="invocation id"):
         _verify_dbt_candidate(
             "mart_daily_order_fulfillment", "phase1_1", results_path, manifest_path
         )

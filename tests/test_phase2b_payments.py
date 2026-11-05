@@ -9,7 +9,11 @@ from pathlib import Path
 
 import pytest
 
+from tests.support import data_dir
+
 REPO = Path(__file__).resolve().parents[1]
+
+pytestmark = pytest.mark.integration
 
 _FIXTURE_ORDER_IDS = (
     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -162,13 +166,11 @@ def test_payments_crash_recovery_reuses_committed_batch():
         assert r1.returncode != 0
         assert "injected crash" in (r1.stdout + r1.stderr)
         before = sorted(
-            (REPO / "data" / "committed_batches" / "order_payments").rglob("manifest.json")
+            (data_dir() / "committed_batches" / "order_payments").rglob("manifest.json")
         )
         r2 = _run("ecom.extract_payments")
         assert r2.returncode == 0, r2.stdout + r2.stderr
-        after = sorted(
-            (REPO / "data" / "committed_batches" / "order_payments").rglob("manifest.json")
-        )
+        after = sorted((data_dir() / "committed_batches" / "order_payments").rglob("manifest.json"))
         assert len(after) == len(before), "retry must not write a second committed batch"
     finally:
         _delete_source_payment(order_id)
@@ -288,7 +290,7 @@ def test_payments_breaking_operational_schema_fails_closed():
             "WHERE source_name='source_postgres' AND entity_name='order_payments'"
         )
         manifests_before = sorted(
-            (REPO / "data" / "committed_batches" / "order_payments").rglob("manifest.json")
+            (data_dir() / "committed_batches" / "order_payments").rglob("manifest.json")
         )
         dsn = os.environ["SOURCE_DSN"]
         with psycopg.connect(dsn) as conn, conn.cursor() as cur:
@@ -311,7 +313,7 @@ def test_payments_breaking_operational_schema_fails_closed():
             "WHERE source_name='source_postgres' AND entity_name='order_payments'"
         )
         manifests_after = sorted(
-            (REPO / "data" / "committed_batches" / "order_payments").rglob("manifest.json")
+            (data_dir() / "committed_batches" / "order_payments").rglob("manifest.json")
         )
         assert checkpoint_before == checkpoint_after
         assert manifests_before == manifests_after

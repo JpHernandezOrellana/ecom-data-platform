@@ -1,7 +1,7 @@
 [project]
 name = "ecom-data-platform"
 version = "0.1.0"
-description = "Local-first e-commerce data platform (Phase 1: orders fulfillment)"
+description = "Local-first e-commerce data platform with incremental ingestion and certified Gold marts"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

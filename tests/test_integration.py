@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.support import data_dir
+
 pytestmark = pytest.mark.integration
 
 REPO = Path(__file__).resolve().parents[1]
@@ -63,10 +65,10 @@ def test_crash_recovery_reuses_committed_batch():
     r1 = _run("ecom.extract", "--fail-after-publish")
     assert r1.returncode != 0
     assert "injected crash" in (r1.stdout + r1.stderr)
-    before = sorted((REPO / "data" / "committed_batches").rglob("manifest.json"))
+    before = sorted((data_dir() / "committed_batches").rglob("manifest.json"))
     r2 = _run("ecom.extract")
     assert r2.returncode == 0
-    after = sorted((REPO / "data" / "committed_batches").rglob("manifest.json"))
+    after = sorted((data_dir() / "committed_batches").rglob("manifest.json"))
     assert len(after) == len(before), "retry must not write a second committed batch"
     assert "recovered committed batch" in r2.stdout or "extraction ok" in r2.stdout
 
@@ -115,7 +117,7 @@ def test_breaking_operational_schema_fails_closed():
         "SELECT cursor_updated_at, cursor_key, last_committed_batch_id FROM control.checkpoint "
         "WHERE source_name='source_postgres' AND entity_name='orders'"
     )
-    manifests_before = sorted((REPO / "data" / "committed_batches").rglob("manifest.json"))
+    manifests_before = sorted((data_dir() / "committed_batches").rglob("manifest.json"))
     dsn = os.environ["SOURCE_DSN"]
     with psycopg.connect(dsn) as conn, conn.cursor() as cur:
         cur.execute("ALTER TABLE source.orders RENAME COLUMN order_status TO order_status_broken")
@@ -134,7 +136,7 @@ def test_breaking_operational_schema_fails_closed():
         "SELECT cursor_updated_at, cursor_key, last_committed_batch_id FROM control.checkpoint "
         "WHERE source_name='source_postgres' AND entity_name='orders'"
     )
-    manifests_after = sorted((REPO / "data" / "committed_batches").rglob("manifest.json"))
+    manifests_after = sorted((data_dir() / "committed_batches").rglob("manifest.json"))
     assert checkpoint_before == checkpoint_after
     assert manifests_before == manifests_after
 
@@ -268,6 +270,30 @@ def test_retention_expires_failed_candidate():
     )
 
 
+def test_retention_expires_failed_category_candidate():
+    """PUB-003: category candidates use the same safe retention path."""
+    import psycopg
+
+    publication_id = f"expired_category_{uuid.uuid4().hex}"
+    relation = f"mart_daily_category_commerce__{publication_id}"
+    with psycopg.connect(os.environ["WAREHOUSE_DSN"]) as conn, conn.cursor() as cur:
+        cur.execute(f"CREATE TABLE gold_candidate.{relation} (value integer)")
+        cur.execute(
+            """INSERT INTO control.publication (
+                 product_name, publication_id, candidate_relation, status, created_at)
+               VALUES ('mart_daily_category_commerce', %s, %s, 'failed', now() - interval '8 days')""",
+            (publication_id, f"gold_candidate.{relation}"),
+        )
+        conn.commit()
+    result = _run("ecom.retention")
+    assert result.returncode == 0
+    assert _pg(f"SELECT to_regclass('gold_candidate.{relation}')") == "[(None,)]"
+    assert (
+        _pg(f"SELECT status FROM control.publication WHERE publication_id='{publication_id}'")
+        == "[('expired',)]"
+    )
+
+
 def test_checkpoint_cas_conflict_fails_explicitly(tmp_path):
     """COMMIT-006: a stale committer is rejected before writing anything."""
     import tempfile
@@ -356,7 +382,7 @@ def test_reconciliation_across_layers():
     import psycopg
 
     manifests = sorted(
-        (REPO / "data" / "committed_batches" / "orders").rglob("batch_id=*/manifest.json")
+        (data_dir() / "committed_batches" / "orders").rglob("batch_id=*/manifest.json")
     )
     assert manifests, "expected committed batch manifests"
     with psycopg.connect(os.environ["WAREHOUSE_DSN"]) as conn, conn.cursor() as cur:

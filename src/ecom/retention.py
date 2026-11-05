@@ -15,7 +15,8 @@ PRODUCTS = (
     "mart_daily_category_commerce",
 )
 RELATION_RE = re.compile(
-    r"^gold_candidate\.(mart_daily_order_fulfillment|mart_daily_commerce|mart_daily_refunds)__[A-Za-z0-9_-]+$"
+    r"^gold_candidate\.(?P<product>mart_daily_order_fulfillment|mart_daily_commerce|"
+    r"mart_daily_refunds|mart_daily_category_commerce)__[A-Za-z0-9_-]+$"
 )
 
 
@@ -65,7 +66,8 @@ def _expire_old_failed_candidates(cur, product: str) -> None:
 
 
 def _drop_candidate(cur, product: str, relation: str) -> None:
-    if not RELATION_RE.fullmatch(relation):
+    match = RELATION_RE.fullmatch(relation)
+    if not match or match.group("product") != product:
         raise SystemExit(f"refusing to drop unexpected candidate relation: {relation}")
     schema, table = relation.split(".", maxsplit=1)
     cur.execute("SELECT to_regclass(%s)", (f"gold.{product}",))

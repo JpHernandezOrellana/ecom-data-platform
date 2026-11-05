@@ -174,8 +174,8 @@ accounting revenue are not assumed to be interchangeable.
 `America/Santiago`. It uses the same `reporting_date` derivation as
 `mart_daily_order_fulfillment`.
 
-All commerce amounts are source-currency BRL. CLP columns do not exist in this mart yet;
-their additive implementation is deferred to Phase 2D under ADR-007.
+Commerce amounts are published in source-currency BRL. `gmv_clp` is the only certified
+additive CLP translation so far; the remaining CLP columns are deferred under ADR-007.
 
 An order is eligible for canonical commerce metrics when its latest known status is
 neither `canceled` nor `unavailable` and it has at least one item. Excluded item values

@@ -76,14 +76,14 @@ with DAG(
 
     dbt_seed = BashOperator(
         task_id="dbt_seed",
-        bash_command=f"cd {PROJECT_DIR}/dbt && uv run --project .. dbt seed --profiles-dir .",
+        bash_command=f"cd {PROJECT_DIR}/dbt && uv run --project .. python -m dbt.cli.main seed --profiles-dir .",
     )
 
     dbt_build = BashOperator(
         task_id="dbt_build",
         bash_command=(
             f"cd {PROJECT_DIR}/dbt && PUBLICATION_ID={PUBLICATION_ID} "
-            "uv run --project .. dbt build --profiles-dir ."
+            "uv run --project .. python -m dbt.cli.main build --profiles-dir ."
         ),
         trigger_rule="all_success",
     )

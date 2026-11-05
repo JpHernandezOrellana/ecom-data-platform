@@ -1,17 +1,16 @@
 # Current Project State
 
-**Last updated:** 2026-10-06
-**Current phase:** Airflow orchestration implemented (ADR-009; evidence:
+**Last updated:** 2026-11-04
+**Current phase:** V1 portfolio hardening verified after Airflow orchestration (ADR-009; evidence:
 `docs/evidence/airflow-orchestration-closure.md`) — one DAG (`ecom_pipeline`) now runs
 every extract/load/dbt/publish stage. Phase 2D implemented for
 `mart_daily_commerce.gmv_clp` (BRL->CLP FX, ADR-007; evidence:
 `docs/evidence/phase2d-closure.md`). Phase 2C fully closed (slice 1: products + sellers +
 `mart_daily_category_commerce`, evidence: `docs/evidence/phase2c-closure.md`; slice 2:
 `customers` dimension, evidence: `docs/evidence/phase2c-slice2-closure.md`)
-**Next phase:** Extend CLP to `freight_value_clp`/`gross_order_value_clp`/`aov_clp` and
-to `mart_daily_category_commerce`/`mart_daily_refunds` (same pattern, additive), enable a
-recurring schedule for either DAG, or a new, separately ADR'd customer-history/
-seller-performance slice
+**Next phase:** Prepare the final portfolio report and, only if useful, a read-only
+presentation query over the certified Gold views. CLP expansion, recurring schedules and
+new customer-history/seller-performance slices remain deferred.
 
 This document is the required entry point for any agent or contributor before touching
 code. It does not replace the formal sources — it routes to them. Read this file and
@@ -415,13 +414,46 @@ Non-blocking items carried forward:
 5. Neither DAG runs on a recurring schedule yet (both `schedule=None`); enabling one is a
    one-line change deferred until there is a concrete freshness requirement.
 
+## 7g. V1 portfolio hardening — closed 2026-11-04
+
+The following safeguards are implemented and verified against fresh Docker volumes and a
+fresh `DATA_DIR`:
+
+- Integration tests require `ECOM_TEST_ENV=1`; modules with PostgreSQL cleanup are marked
+  as integration so they cannot run during the unit-only command.
+- The base Compose/CI path starts only the two PostgreSQL services; Airflow is an explicit
+  `airflow` profile and remains optional.
+- `publish` checks a shared dbt `invocation_id`, rejects reuse of a certified publication
+  ID, and uses a PostgreSQL advisory lock per product.
+- Checkpoint commits use a PostgreSQL advisory lock per source/entity, closing the missing
+  row case in the previous application-level comparison.
+- Candidate retention now validates all four registered Gold products, including category
+  commerce.
+- `scripts/demo_synthetic.sh` provides a deterministic all-entity path using fixtures and
+  fixture FX rates, without network or Airflow.
+
+Verification completed in this session:
+
+- Docker Engine `29.7.2` responded.
+- 25 unit tests passed.
+- 49 integration tests passed, with the reconciliation test passing separately.
+- dbt baseline and final builds passed with `67/67` nodes each.
+- All four Gold products published in both baseline and final candidates.
+- `scripts/demo_synthetic.sh` passed and published all four products with
+  `publication_id=demo_20261104210434`.
+- Ruff lint and format checks, shell syntax, Compose config and `git diff --check` passed.
+- The only dbt output requiring follow-up is the existing deprecation warning for the
+  `tests` config name; it did not affect correctness.
+
+The full Olist dataset and Airflow execution were not part of this fresh verification.
+
 ## 8. Recommended next slice
 
-Extend CLP to the remaining `mart_daily_commerce` columns and to
-`mart_daily_category_commerce`/`mart_daily_refunds` (ADR-007, additive, same pattern).
-Alternatively, enable a recurring schedule for `ecom_retention` or `ecom_pipeline` once a
-concrete freshness requirement exists, or a new customer-history or seller-performance
-slice, pending its own ADR — none of these is started.
+Close the V1 hardening slice first: run the isolated integration suite, execute
+`scripts/demo_synthetic.sh` from a clean Docker environment, and record the resulting
+counts and publication IDs. Only after that evidence is refreshed should the project
+consider extending CLP to the remaining `mart_daily_commerce` columns, enabling a
+recurring schedule, or proposing a new customer-history/seller-performance slice.
 
 ## 9. Keeping this file honest
 

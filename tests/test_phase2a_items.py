@@ -10,8 +10,11 @@ from pathlib import Path
 import pytest
 
 from ecom.cursor import build_predicate
+from tests.support import data_dir
 
 REPO = Path(__file__).resolve().parents[1]
+
+pytestmark = pytest.mark.integration
 
 _FIXTURE_ORDER_IDS = (
     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -233,12 +236,10 @@ def test_items_crash_recovery_reuses_committed_batch():
         r1 = _run("ecom.extract_items", "--fail-after-publish")
         assert r1.returncode != 0
         assert "injected crash" in (r1.stdout + r1.stderr)
-        before = sorted(
-            (REPO / "data" / "committed_batches" / "order_items").rglob("manifest.json")
-        )
+        before = sorted((data_dir() / "committed_batches" / "order_items").rglob("manifest.json"))
         r2 = _run("ecom.extract_items")
         assert r2.returncode == 0, r2.stdout + r2.stderr
-        after = sorted((REPO / "data" / "committed_batches" / "order_items").rglob("manifest.json"))
+        after = sorted((data_dir() / "committed_batches" / "order_items").rglob("manifest.json"))
         assert len(after) == len(before), "retry must not write a second committed batch"
         assert "recovered committed batch" in r2.stdout or "extraction ok" in r2.stdout
     finally:
@@ -393,7 +394,7 @@ def test_items_breaking_operational_schema_fails_closed():
             "WHERE source_name='source_postgres' AND entity_name='order_items'"
         )
         manifests_before = sorted(
-            (REPO / "data" / "committed_batches" / "order_items").rglob("manifest.json")
+            (data_dir() / "committed_batches" / "order_items").rglob("manifest.json")
         )
         dsn = os.environ["SOURCE_DSN"]
         with psycopg.connect(dsn) as conn, conn.cursor() as cur:
@@ -412,7 +413,7 @@ def test_items_breaking_operational_schema_fails_closed():
             "WHERE source_name='source_postgres' AND entity_name='order_items'"
         )
         manifests_after = sorted(
-            (REPO / "data" / "committed_batches" / "order_items").rglob("manifest.json")
+            (data_dir() / "committed_batches" / "order_items").rglob("manifest.json")
         )
         assert checkpoint_before == checkpoint_after
         assert manifests_before == manifests_after

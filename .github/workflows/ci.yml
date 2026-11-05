@@ -31,8 +31,9 @@ env:
   WAREHOUSE_DSN: postgresql://warehouse_app:ci_warehouse_pw@localhost:5434/ecom_warehouse
 
   BOOTSTRAP_LOADED_AT: "2018-10-20T00:00:00+00:00"
-  DATA_DIR: ./data
+  DATA_DIR: ./var/ci-data
   BATCH_PAGE_SIZE: "2"
+  ECOM_TEST_ENV: "1"
 
 jobs:
   verify:
@@ -61,10 +62,10 @@ jobs:
         run: uv run --extra dev ruff format --check src tests
 
       - name: Unit tests (no Postgres)
-        run: uv run --extra dev pytest -m "not integration" tests/
+        run: uv run python -m pytest -m "not integration" tests/
 
       - name: Start local Postgres stack
-        run: docker compose up -d --wait
+        run: docker compose --profile airflow up -d --wait source-postgres warehouse-postgres
 
       - name: Bootstrap synthetic fixtures
         run: |
@@ -100,11 +101,11 @@ jobs:
 
       - name: dbt seed (static reference data)
         working-directory: dbt
-        run: uv run --project .. dbt seed --profiles-dir .
+         run: uv run --project .. python -m dbt.cli.main seed --profiles-dir .
 
       - name: dbt build (baseline candidate)
         working-directory: dbt
-        run: PUBLICATION_ID=ci_baseline uv run --project .. dbt build --profiles-dir .
+         run: PUBLICATION_ID=ci_baseline uv run --project .. python -m dbt.cli.main build --profiles-dir .
 
       - name: Publish baseline Gold candidates
         run: |
@@ -130,7 +131,7 @@ jobs:
 
       - name: Integration tests (excluding final reconciliation)
         run: |
-          uv run --extra dev pytest -m integration \
+          uv run python -m pytest -m integration \
             -k "not test_reconciliation_across_layers" \
             tests/
 
@@ -139,7 +140,7 @@ jobs:
 
       - name: dbt build (final candidate)
         working-directory: dbt
-        run: PUBLICATION_ID=ci_final uv run --project .. dbt build --profiles-dir .
+         run: PUBLICATION_ID=ci_final uv run --project .. python -m dbt.cli.main build --profiles-dir .
 
       - name: Publish final Gold candidates
         run: |
@@ -164,7 +165,7 @@ jobs:
             --dbt-manifest dbt/target/manifest.json
 
       - name: Reconciliation test
-        run: uv run --extra dev pytest tests/test_integration.py::test_reconciliation_across_layers
+        run: uv run python -m pytest tests/test_integration.py::test_reconciliation_across_layers
 
       - name: Tear down local Postgres stack
         if: always()

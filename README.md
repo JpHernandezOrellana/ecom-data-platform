@@ -41,6 +41,23 @@ extract/load/dbt/publish stage, wrapping the existing CLI commands without any n
 transformation logic. Verified locally end-to-end against synthetic fixtures; not yet
 run against the full Olist dataset.
 
+## Portfolio demo
+
+The shortest current path is the deterministic synthetic demo. It exercises all seven
+entities, a synthetic refund, fixture FX rates, dbt and all four Gold publications without
+calling external data providers or starting Airflow:
+
+```bash
+cp -n .env.example .env
+uv sync --frozen --extra dev
+scripts/demo_synthetic.sh
+```
+
+The script uses `var/demo-data/`, which is ignored by Git, and never removes Docker
+volumes. Use a fresh Compose project when demonstrating the run to another person.
+The resulting publication ID is printed at the end; query the `gold.*` views in the
+warehouse using the credentials from `.env`.
+
 Phase 1 closure evidence is in [`docs/evidence/phase1-closure.md`](docs/evidence/phase1-closure.md).
 Phase 1.1 hardening evidence is in
 [`docs/evidence/phase1_1-closure.md`](docs/evidence/phase1_1-closure.md).
@@ -132,6 +149,7 @@ Phase 1 contains no monetary metrics.
 | Artifact | Purpose | Status |
 |---|---|---|
 | [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md) | Agent/contributor entry point: state, invariants, routing | Current |
+| [`Study guide`](docs/guia-estudio-proyecto.md) | Human learning path through architecture, code, tests, and evidence | Current |
 | [`SDD.md`](SDD.md) | Canonical project-specific source of truth | Accepted |
 | [`Archived SDD v1`](docs/archive/SDD_v1.md) | Original design retained for history | Superseded |
 | [`ARCHITECTURE_BIBLE.md`](ARCHITECTURE_BIBLE.md) | General architecture principles | Living guidance |
@@ -219,8 +237,8 @@ Phase 0 was accepted by Juan Pablo on 2026-09-06 after:
 Prerequisites: Docker Desktop running, `cp -n .env.example .env`, Python 3.12 + `uv`.
 
 ```bash
-uv sync --extra dev
-docker compose up -d
+uv sync --frozen --extra dev
+docker compose up -d --wait source-postgres warehouse-postgres
 set -a; source .env; set +a
 uv run python -m ecom.bootstrap --csv dataset/olist_orders_dataset.csv --attempt-id boot-001
 scripts/create_source_reader.sh
@@ -229,10 +247,10 @@ uv run python -m ecom.load
 uv run python -m ecom.mutate --ts 2018-10-21T00:00:00+00:00
 uv run python -m ecom.extract
 uv run python -m ecom.load
-cd dbt && PUBLICATION_ID=phase1 uv run --project .. dbt build --profiles-dir . && cd ..
+cd dbt && PUBLICATION_ID=phase1 uv run --project .. python -m dbt.cli.main build --profiles-dir . && cd ..
 uv run python -m ecom.publish --publication-id phase1 --test-results dbt/target/run_results.json --dbt-manifest dbt/target/manifest.json
 uv run python -m ecom.retention
-uv run --extra dev pytest tests/
+ECOM_TEST_ENV=1 uv run python -m pytest tests/
 uv run --extra dev ruff check src tests
 ```
 
@@ -252,7 +270,7 @@ Run after the Phase 1 runbook above, against the same running stack:
 uv run python -m ecom.bootstrap_items --csv dataset/olist_order_items_dataset.csv --attempt-id boot-items-001
 uv run python -m ecom.extract_items
 uv run python -m ecom.load_items
-cd dbt && PUBLICATION_ID=phase2a uv run --project .. dbt build --profiles-dir . && cd ..
+cd dbt && PUBLICATION_ID=phase2a uv run --project .. python -m dbt.cli.main build --profiles-dir . && cd ..
 uv run python -m ecom.publish --product mart_daily_commerce --publication-id phase2a --test-results dbt/target/run_results.json --dbt-manifest dbt/target/manifest.json
 ```
 
@@ -271,7 +289,7 @@ uv run python -m ecom.load_payments
 uv run python -m ecom.generate_refunds --ts 2018-10-22T00:00:00+00:00
 uv run python -m ecom.extract_refunds
 uv run python -m ecom.load_refunds
-cd dbt && PUBLICATION_ID=phase2b uv run --project .. dbt build --profiles-dir . && cd ..
+cd dbt && PUBLICATION_ID=phase2b uv run --project .. python -m dbt.cli.main build --profiles-dir . && cd ..
 uv run python -m ecom.publish --product mart_daily_refunds --publication-id phase2b --test-results dbt/target/run_results.json --dbt-manifest dbt/target/manifest.json
 ```
 
@@ -292,8 +310,8 @@ uv run python -m ecom.load_products
 uv run python -m ecom.bootstrap_sellers --csv dataset/olist_sellers_dataset.csv --attempt-id boot-sell-001
 uv run python -m ecom.extract_sellers
 uv run python -m ecom.load_sellers
-cd dbt && uv run --project .. dbt seed --profiles-dir .
-PUBLICATION_ID=phase2c uv run --project .. dbt build --profiles-dir . && cd ..
+cd dbt && uv run --project .. python -m dbt.cli.main seed --profiles-dir .
+PUBLICATION_ID=phase2c uv run --project .. python -m dbt.cli.main build --profiles-dir . && cd ..
 uv run python -m ecom.publish --product mart_daily_category_commerce --publication-id phase2c --test-results dbt/target/run_results.json --dbt-manifest dbt/target/manifest.json
 ```
 
@@ -328,8 +346,8 @@ Run after the Phase 2A runbook above, against the same running stack:
 uv run python -m ecom.fetch_fx_rates --from-date 2016-01-01 --to-date 2018-12-31
 # or, without live network access:
 uv run python -m ecom.fetch_fx_rates --from-date 2017-01-01 --to-date 2018-02-01 --fixture-dir tests/fixtures/fx
-cd dbt && uv run --project .. dbt seed --profiles-dir .
-PUBLICATION_ID=phase2d uv run --project .. dbt build --profiles-dir . && cd ..
+cd dbt && uv run --project .. python -m dbt.cli.main seed --profiles-dir .
+PUBLICATION_ID=phase2d uv run --project .. python -m dbt.cli.main build --profiles-dir . && cd ..
 uv run python -m ecom.publish --product mart_daily_commerce --publication-id phase2d --test-results dbt/target/run_results.json --dbt-manifest dbt/target/manifest.json
 ```
 

@@ -470,6 +470,10 @@ def _commit_checkpoint(
     _verify_manifest_files(Path(manifest_path).parent, manifest)
     with connect(settings.warehouse_dsn) as wconn, wconn.cursor() as cur:
         cur.execute(
+            "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+            (f"checkpoint:{SOURCE_NAME}:{ENTITY}",),
+        )
+        cur.execute(
             "SELECT cursor_updated_at, cursor_key FROM control.checkpoint WHERE source_name=%s AND entity_name=%s",
             (SOURCE_NAME, ENTITY),
         )

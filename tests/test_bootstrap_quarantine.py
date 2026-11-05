@@ -1,5 +1,6 @@
 """Bootstrap contract/quarantine tests (need DB for accepted rows)."""
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -9,6 +10,11 @@ import pytest
 pytestmark = pytest.mark.integration
 
 REPO = Path(__file__).resolve().parents[1]
+
+
+def _data_dir() -> Path:
+    configured = Path(os.environ.get("DATA_DIR", "./data"))
+    return configured if configured.is_absolute() else REPO / configured
 
 
 def _bootstrap(csv_text: str, attempt: str):
@@ -70,8 +76,7 @@ def test_threshold_exceeded_fails_after_durable_quarantine():
     assert r.returncode != 0
     assert "threshold exceeded" in (r.stdout + r.stderr)
     q = (
-        REPO
-        / "data"
+        _data_dir()
         / "quarantine"
         / "bootstrap"
         / "orders"
@@ -127,8 +132,7 @@ def test_isolated_bad_row_quarantined_below_threshold():
         )
         conn.commit()
     q = (
-        REPO
-        / "data"
+        _data_dir()
         / "quarantine"
         / "bootstrap"
         / "orders"

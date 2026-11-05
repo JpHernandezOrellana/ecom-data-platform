@@ -72,15 +72,29 @@ def main() -> None:
     with connect(settings.warehouse_dsn) as conn:
         ensure_phase_1_1_warehouse_schema(conn)
         with conn.cursor() as cur:
-            # Lock detection happens before artifact inspection so a competing
-            # invocation cannot do work while another publication is active.
             cur.execute(
-                "SELECT publication_id FROM control.publication WHERE product_name=%s AND status='publishing' FOR UPDATE",
+                "SELECT pg_try_advisory_xact_lock(hashtextextended(%s, 0))",
+                (f"publication:{PRODUCT}",),
+            )
+            if not cur.fetchone()[0]:
+                conn.rollback()
+                raise SystemExit("another publication is active")
+            cur.execute(
+                "SELECT publication_id FROM control.publication "
+                "WHERE product_name=%s AND status='publishing' FOR UPDATE",
                 (PRODUCT,),
             )
             if cur.fetchone():
                 conn.rollback()
                 raise SystemExit("another publication is active")
+            cur.execute(
+                "SELECT status FROM control.publication "
+                "WHERE product_name=%s AND publication_id=%s FOR UPDATE",
+                (PRODUCT, args.publication_id),
+            )
+            existing = cur.fetchone()
+            if existing and existing[0] in {"published", "retired"}:
+                raise SystemExit("publication id already refers to a certified candidate")
             try:
                 _verify_dbt_candidate(
                     PRODUCT, args.publication_id, args.test_results, args.dbt_manifest
@@ -138,6 +152,10 @@ def _verify_dbt_candidate(
 ) -> None:
     results = json.loads(results_path.read_text())
     manifest = json.loads(manifest_path.read_text())
+    manifest_invocation = manifest.get("metadata", {}).get("invocation_id")
+    results_invocation = results.get("metadata", {}).get("invocation_id")
+    if not manifest_invocation or manifest_invocation != results_invocation:
+        raise ValueError("dbt manifest and run results do not share an invocation id")
     expected_relation = f"gold_candidate.{product}__{publication_id}"
     model_id = next(
         (

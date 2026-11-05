@@ -18,7 +18,11 @@ from pathlib import Path
 
 import pytest
 
+from tests.support import data_dir
+
 REPO = Path(__file__).resolve().parents[1]
+
+pytestmark = pytest.mark.integration
 
 _FIXTURE_CUSTOMER_IDS = (
     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -153,10 +157,10 @@ def test_customers_crash_recovery_reuses_committed_batch():
         r1 = _run("ecom.extract_customers", "--fail-after-publish")
         assert r1.returncode != 0
         assert "injected crash" in (r1.stdout + r1.stderr)
-        before = sorted((REPO / "data" / "committed_batches" / "customers").rglob("manifest.json"))
+        before = sorted((data_dir() / "committed_batches" / "customers").rglob("manifest.json"))
         r2 = _run("ecom.extract_customers")
         assert r2.returncode == 0, r2.stdout + r2.stderr
-        after = sorted((REPO / "data" / "committed_batches" / "customers").rglob("manifest.json"))
+        after = sorted((data_dir() / "committed_batches" / "customers").rglob("manifest.json"))
         assert len(after) == len(before), "retry must not write a second committed batch"
         assert "recovered committed batch" in r2.stdout or "extraction ok" in r2.stdout
     finally:
@@ -282,7 +286,7 @@ def test_customers_breaking_operational_schema_fails_closed():
             "WHERE source_name='source_postgres' AND entity_name='customers'"
         )
         manifests_before = sorted(
-            (REPO / "data" / "committed_batches" / "customers").rglob("manifest.json")
+            (data_dir() / "committed_batches" / "customers").rglob("manifest.json")
         )
         dsn = os.environ["SOURCE_DSN"]
         with psycopg.connect(dsn) as conn, conn.cursor() as cur:
@@ -303,7 +307,7 @@ def test_customers_breaking_operational_schema_fails_closed():
             "WHERE source_name='source_postgres' AND entity_name='customers'"
         )
         manifests_after = sorted(
-            (REPO / "data" / "committed_batches" / "customers").rglob("manifest.json")
+            (data_dir() / "committed_batches" / "customers").rglob("manifest.json")
         )
         assert checkpoint_before == checkpoint_after
         assert manifests_before == manifests_after

@@ -4,6 +4,9 @@
 # Runtime data products.
 /data/committed_batches/
 /data/quarantine/
+/var/demo-data/
+/var/ci-data*/
+/var/ci-run*/
 
 # Secrets and local configuration.
 .env
