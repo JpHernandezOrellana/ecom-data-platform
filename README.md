@@ -1,51 +1,76 @@
-# Local-First E-commerce Data Platform
+# Plataforma de Datos para E-commerce
 
-A portfolio Data Engineering project designed to demonstrate reliable incremental ingestion, immutable raw evidence, explicit data contracts, quality isolation, dbt modeling, and failure recovery without paid infrastructure.
+Plataforma local de ingeniería de datos que transforma cambios de un sistema operacional
+de comercio electrónico en productos analíticos confiables.
 
-## Current status
+El proyecto ingiere pedidos, ítems, pagos, productos, vendedores y clientes desde
+PostgreSQL; conserva evidencia original en Parquet; valida contratos y filas inválidas;
+modela métricas con dbt; y publica vistas Gold certificadas para análisis de
+cumplimiento, comercio y categorías.
 
-> **Start here:** [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md) — current state, invariants, open decisions, and task-specific reading map for any agent or contributor.
+No intenta ser un sistema transaccional, una plataforma de alertas ni una demostración
+de infraestructura distribuida. Su objetivo es demostrar cómo construir una frontera
+reproducible entre una fuente operacional y datos analíticos versionados.
 
-For the authoritative current phase, completed slices, implementation authorization, and
-next work, see [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md). This README intentionally
-does not duplicate mutable progress metadata.
+## Problema
 
-Phase 1 delivers: Docker Compose with source + warehouse PostgreSQL, deterministic Olist
-bootstrap (99,441 orders), bounded `(source_updated_at, order_id)` extraction, Parquet
-committed batches with manifest + quarantine envelope, crash recovery, idempotent
-warehouse load, dbt `stg_orders`, versioned Gold candidate with certified-view promotion,
-and `gold.mart_daily_order_fulfillment` (one row per Chilean purchase-date cohort).
+Un sistema operacional de pedidos no debería ser al mismo tiempo el almacén de
+analítica. Este proyecto separa ambas responsabilidades y permite responder preguntas
+como:
 
-Verified reconciliation: source 99,442 = silver 99,442 = gold 99,442
-(99,441 Olist + 1 deterministic demo mutation).
+- ¿Cuántos pedidos se compraron y entregaron por fecha?
+- ¿Qué proporción de pedidos válidos llegó tarde?
+- ¿Cuál es el GMV y el flete por cohorte de compra?
+- ¿Cómo se distribuye el comercio por categoría de producto?
+- ¿Qué observaciones de pagos o devoluciones requieren revisión?
 
-Phase 2A adds `order_items` ingestion with a composite cursor key (ADR-006), both
-incremental and backfill extraction, and a BRL-only `gold.mart_daily_commerce` (GMV,
-freight, AOV; ADR-005), with the same failure-injection test coverage as orders and a
-blocking no-orphan-items invariant (GOLD-COM-ORPHAN-001). Phase 2B adds `order_payments`
-ingestion with a payment-reconciliation diagnostic model (`int_payment_reconciliation`,
-never a GMV input) and a deterministic synthetic refund generator
-(`ecom.generate_refunds`, parallel to `ecom.mutate`) feeding `gold.mart_daily_refunds`
-(grained by refund date, never netted into `gmv_brl`). Phase 2C slice 1 adds `products`
-and `sellers` as simple-key dimensions (ADR-008, reusing ADR-002 unchanged) and
-`gold.mart_daily_category_commerce`, breaking BRL commerce value down by product category
-at item grain; its total reconciles exactly to `mart_daily_commerce.gmv_brl` per date.
-Phase 2C slice 2 adds `customers` as a dimension and exposes the `customer_id` vs
-`customer_unique_id` distinction (SDD §9.4), with no new metric defined on it yet — that
-remains deferred pending its own ADR. Phase 2D implements ADR-007's BRL->CLP design for
-`mart_daily_commerce.gmv_clp`: `ecom.fetch_fx_rates` pulls BCB PTAX and SII Dolar
-Observado rates for a bounded date range, and `silver.int_fx_cross_rate` resolves a
-7-day-carry-forward cross-rate per date, failing the build closed when a date cannot
-resolve. One Airflow DAG (`ecom_pipeline`, ADR-009) now orchestrates every
-extract/load/dbt/publish stage, wrapping the existing CLI commands without any new
-transformation logic. Verified locally end-to-end against synthetic fixtures; not yet
-run against the full Olist dataset.
+El producto principal es una familia de productos Gold, no solo una tabla final:
 
-## Portfolio demo
+| Producto | Grano | Uso principal |
+|---|---|---|
+| `mart_daily_order_fulfillment` | Una fila por fecha de compra | Cumplimiento y entregas tardías |
+| `mart_daily_commerce` | Una fila por fecha de compra | GMV, flete, AOV y CLP |
+| `mart_daily_category_commerce` | Fecha y categoría | Desglose del GMV por producto |
+| `mart_daily_refunds` | Una fila por fecha de devolución | Eventos sintéticos de devolución |
 
-The shortest current path is the deterministic synthetic demo. It exercises all seven
-entities, a synthetic refund, fixture FX rates, dbt and all four Gold publications without
-calling external data providers or starting Airflow:
+`gmv_brl` no es ingreso contable: excluye flete, pedidos cancelados/no disponibles y devoluciones.
+Las devoluciones son sintéticas porque Olist no contiene eventos observados de devolución.
+`gmv_clp` es una conversión aditiva y actualmente es la única métrica CLP certificada.
+Las definiciones completas están en el [glosario de métricas](docs/metrics.md).
+
+## Cómo funciona
+
+```mermaid
+flowchart LR
+    A[Fuente operacional PostgreSQL] --> B[Extracción incremental]
+    B --> C[Contrato y validación]
+    C --> D[Bronze Parquet]
+    C --> E[Cuarentena Parquet]
+    D --> F[Almacén PostgreSQL]
+    F --> G[dbt Silver e intermedios]
+    G --> H[Candidato Gold]
+    H --> I[Pruebas y reconciliaciones]
+    I --> J[Vistas Gold certificadas]
+```
+
+Cada entidad usa una ventana incremental acotada por cursor. La extracción fija su
+límite superior dentro de un snapshot estable y registra un lote comprometido antes
+de avanzar el punto de control.
+
+El flujo conserva tres estados que cumplen funciones distintas:
+
+- **Bronze:** evidencia de lo recibido, con manifest y hashes.
+- **Silver:** versiones normalizadas y selección del estado actual por clave.
+- **Gold:** productos de consumo con grano, métricas y pruebas explícitas.
+
+Una publicación Gold se construye primero como candidato. Solo una ejecución dbt
+exitosa y validada puede reemplazar la vista estable. Un fallo de transformación no
+debe reemplazar la última publicación certificada.
+
+## Demo de portafolio
+
+La ruta más corta usa fixtures sintéticos, no requiere descargar Olist, no consulta
+proveedores FX y no inicia Airflow:
 
 ```bash
 cp -n .env.example .env
@@ -53,364 +78,137 @@ uv sync --frozen --extra dev
 scripts/demo_synthetic.sh
 ```
 
-The script uses `var/demo-data/`, which is ignored by Git, and never removes Docker
-volumes. Use a fresh Compose project when demonstrating the run to another person.
-The resulting publication ID is printed at the end; query the `gold.*` views in the
-warehouse using the credentials from `.env`.
+La demo:
 
-Phase 1 closure evidence is in [`docs/evidence/phase1-closure.md`](docs/evidence/phase1-closure.md).
-Phase 1.1 hardening evidence is in
-[`docs/evidence/phase1_1-closure.md`](docs/evidence/phase1_1-closure.md).
-Phase 2A closure evidence is in
-[`docs/evidence/phase2a-closure.md`](docs/evidence/phase2a-closure.md).
-Phase 2B closure evidence is in
-[`docs/evidence/phase2b-closure.md`](docs/evidence/phase2b-closure.md).
-Phase 2C slice 1 closure evidence is in
-[`docs/evidence/phase2c-closure.md`](docs/evidence/phase2c-closure.md).
-Phase 2C slice 2 closure evidence is in
-[`docs/evidence/phase2c-slice2-closure.md`](docs/evidence/phase2c-slice2-closure.md).
-Phase 2D closure evidence is in
-[`docs/evidence/phase2d-closure.md`](docs/evidence/phase2d-closure.md).
-Airflow orchestration closure evidence is in
-[`docs/evidence/airflow-orchestration-closure.md`](docs/evidence/airflow-orchestration-closure.md).
+- Levanta los dos PostgreSQL locales.
+- Ingresa las siete entidades.
+- Ejecuta extracción incremental y carga idempotente.
+- Genera una devolución sintética.
+- Usa tasas de cambio sintéticas para BRL/CLP.
+- Ejecuta `dbt seed` y `dbt build`.
+- Publica los cuatro productos Gold.
 
-## Business problem
+El script utiliza `var/demo-data/`, ignorado por Git, y no elimina volúmenes Docker.
+Para una demostración reproducible desde cero, usa un proyecto Compose nuevo o reinicia
+los volúmenes de forma explícita. El `publication_id` se imprime al finalizar.
 
-An e-commerce operational system should not also serve analytical workloads. This project creates a reproducible boundary that incrementally extracts operational changes, preserves source evidence, isolates invalid records, builds reusable analytical models, and publishes tested business metrics.
+La demo separa el procesamiento del consumo: los productos quedan consultables como
+vistas `gold.*` en el almacén. No hay un panel residente en esta versión.
 
-Phase 1 will answer fulfillment questions such as:
+## Arquitectura de datos
 
-- How many orders were purchased each day?
-- How many purchased orders were delivered or canceled?
-- How frequently were valid delivered orders late?
-- How long did valid delivery take?
-- How many orders contain known fulfillment-quality issues?
+### Ingesta y recuperación
 
-## Phase 1 architecture
+- Carga inicial determinista con suma de comprobación para el dataset Olist.
+- Extracción incremental por `(source_updated_at, key)`.
+- Paginación con ventana superior fija.
+- Reprocesamientos acotados que no avanzan el punto de control normal.
+- Reintentos seguros e idempotencia por lote.
 
-```mermaid
-flowchart LR
-    OLIST[Olist orders CSV] --> SOURCE[(Source PostgreSQL)]
-    SOURCE --> INGEST[Bounded Python ingestion]
-    INGEST --> BATCH[Committed batch envelope]
-    BATCH --> BRONZE[Bronze Parquet]
-    BATCH --> QUARANTINE[Quarantine Parquet]
-    BRONZE --> WAREHOUSE[(Warehouse PostgreSQL)]
-    WAREHOUSE --> SILVER[dbt stg_orders]
-    SILVER --> CANDIDATE[Versioned Gold candidate]
-    CANDIDATE --> TESTS[Required tests]
-    TESTS --> GOLD[Certified Gold view]
-    QUARANTINE --> INSPECTION[Inspection and correction]
-```
+### Calidad de datos
 
-The first certified product will be `mart_daily_order_fulfillment`, with one row per Chilean purchase-date cohort.
+- Contratos explícitos para entradas operacionales y productos Gold.
+- Filas inválidas aisladas en cuarentena cuando es seguro continuar.
+- Cambios estructurales incompatibles fallan cerrados.
+- Comprobaciones de huérfanos, reconciliaciones, grano y métricas.
+- Tipos monetarios de precisión fija y política temporal documentada.
 
-## Source data
+### Publicación analítica
 
-The historical source is the [Brazilian E-Commerce Public Dataset by Olist](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce), reported by Kaggle under CC BY-NC-SA 4.0.
+- Candidatos Gold con identificador de publicación.
+- Artefactos `manifest.json` y `run_results.json` asociados a la misma invocación dbt.
+- Bloqueo transaccional por producto y por punto de control.
+- Vistas Gold estables independientes de las tablas candidatas.
+- Retención segura de candidatos antiguos y fallidos.
 
-The reviewed local copy contains nine files, 126,186,995 bytes, and 1,550,922 logical CSV records. Exact file sizes, headers, row counts, and SHA-256 values are recorded in [`data/manifest.json`](data/manifest.json).
+## Decisiones técnicas
 
-Raw CSV files are intentionally excluded from Git. To review the same source locally, obtain the dataset under its license and place its nine CSV files in `dataset/`. Do not rename source columns.
+- **PostgreSQL operacional y almacén:** separa extracción de consultas analíticas y
+  permite demostrar cargas, puntos de control y restricciones relacionales sin servicios pagos.
+- **Python y Parquet:** el volumen de la demo no justifica un framework distribuido; los
+  archivos comprometidos permiten conservar evidencia y reanudar después de una caída.
+- **dbt:** concentra transformaciones, documentación, pruebas y contratos de los productos
+  de consumo.
+- **Candidato Gold → vista certificada:** evita que una corrida fallida exponga resultados
+  parciales o mezcle generaciones de datos.
+- **Airflow opcional:** agenda los mismos comandos existentes, pero no contiene la lógica
+  de negocio. El flujo manual sigue funcionando sin un planificador residente.
+- **Sin Spark, Kafka ni nube:** no se agregan componentes distribuidos sin una necesidad
+  de volumen, latencia o disponibilidad que lo justifique.
 
-## License
+## Empezar
 
-Project code is released under the [MIT License](LICENSE). The Olist dataset itself is
-**not** included in this repository and remains under its original CC BY-NC-SA 4.0 terms;
-obtain it directly from Kaggle under that license.
+El dataset histórico de Olist no está incluido en Git. Está sujeto a sus propios términos
+CC BY-NC-SA 4.0 y debe ubicarse en `dataset/` respetando los nombres originales.
 
-## Brazil source and Chile reporting
-
-The project does not relabel Brazilian values as Chilean data.
-
-- Historical monetary values remain source-currency BRL.
-- Naive historical timestamps are interpreted under the documented `America/Sao_Paulo` assumption.
-- Canonical instants are stored in UTC.
-- Consumer reporting dates use `America/Santiago`.
-- CLP reporting (ADR-007) is implemented for `mart_daily_commerce.gmv_clp` only; every
-  other mart and column remains BRL-only until its own additive follow-up.
-
-Phase 1 contains no monetary metrics.
-
-## Key engineering guarantees
-
-- Cursor ordering uses `(source_updated_at, order_id)`.
-- Extraction windows are lower-exclusive and upper-inclusive.
-- The upper cursor is fixed from one stable source snapshot.
-- A checkpoint advances only after all extracted rows are durably accounted for.
-- Filesystem and PostgreSQL commits use deterministic recovery rather than a false cross-system atomicity claim.
-- Reprocessing converges without duplicate canonical facts.
-- Invalid records are retained in quarantine rather than silently dropped.
-- Failed Gold candidates do not replace the last certified output.
-- The system claims at-least-once processing with idempotent convergence, not exactly-once delivery.
-
-## Documentation map
-
-| Artifact | Purpose | Status |
-|---|---|---|
-| [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md) | Agent/contributor entry point: state, invariants, routing | Current |
-| [`Study guide`](docs/guia-estudio-proyecto.md) | Human learning path through architecture, code, tests, and evidence | Current |
-| [`SDD.md`](SDD.md) | Canonical project-specific source of truth | Accepted |
-| [`Archived SDD v1`](docs/archive/SDD_v1.md) | Original design retained for history | Superseded |
-| [`ARCHITECTURE_BIBLE.md`](ARCHITECTURE_BIBLE.md) | General architecture principles | Living guidance |
-| [`AGENTS.md`](AGENTS.md) | Repository operating rules | Active |
-| [`ADR-001`](docs/adrs/ADR-001-local-topology.md) | Local source and warehouse topology | Accepted |
-| [`ADR-002`](docs/adrs/ADR-002-incremental-commit-protocol.md) | Cursor, commit, checkpoint, and recovery | Accepted |
-| [`ADR-003`](docs/adrs/ADR-003-contract-quality-quarantine.md) | Contracts, quality, and quarantine | Accepted |
-| [`ADR-004`](docs/adrs/ADR-004-fulfillment-mart.md) | Gold grain, metrics, and publication | Accepted |
-| [`ADR-005`](docs/adrs/ADR-005-commerce-metrics.md) | GMV, AOV, freight, cancellations, refunds | Accepted |
-| [`ADR-006`](docs/adrs/ADR-006-composite-entity-cursor.md) | Composite-key cursor for `order_items` | Accepted |
-| [`ADR-007`](docs/adrs/ADR-007-fx-brl-clp.md) | BRL-to-CLP FX source and conversion policy | Accepted (implemented for gmv_clp) |
-| [`ADR-008`](docs/adrs/ADR-008-category-seller-dimensions.md) | Products/sellers dimensions and category commerce mart | Accepted |
-| [`ADR-009`](docs/adrs/ADR-009-airflow-orchestration.md) | Airflow orchestration of existing pipeline stages | Accepted |
-| [`Metric glossary`](docs/metrics.md) | Canonical certified-mart metric semantics | Accepted |
-| [`Test matrix`](docs/testing/phase1-test-matrix.md) | Required Phase 1 verification | Accepted |
-| [`Phase 1 closure evidence`](docs/evidence/phase1-closure.md) | Acceptance results and layer reconciliation | Closed |
-| [`Phase 1.1 closure evidence`](docs/evidence/phase1_1-closure.md) | Design-alignment hardening results | Closed |
-| [`Phase 2A closure evidence`](docs/evidence/phase2a-closure.md) | Order items + BRL commerce results | Closed |
-| [`Phase 2B closure evidence`](docs/evidence/phase2b-closure.md) | Order payments ingestion + synthetic refunds results | Closed |
-| [`Phase 2B payments evidence (historical)`](docs/evidence/phase2b-payments-closure.md) | Intermediate payments-only closure, superseded above | Historical |
-| [`Historical progress report`](docs/evidence/progress-report.md) | Snapshot at Phase 1.1 closure | Historical |
-| [`Phase 1 implementation guide`](docs/phase1-implementation-guide.md) | Historical Phase 1/1.1 implementation snapshot | Historical |
-| [`Olist bootstrap contract`](contracts/source/olist_orders.v1.yaml) | Historical CSV boundary | Accepted |
-| [`Operational orders contract`](contracts/source/operational_orders.v1.yaml) | Incremental PostgreSQL boundary | Accepted |
-| [`Gold contract`](contracts/gold/mart_daily_order_fulfillment.v1.yaml) | Certified consumer product | Accepted |
-| [`Olist order_items contract`](contracts/source/olist_order_items.v1.yaml) | Historical CSV boundary (Phase 2A) | Accepted |
-| [`Operational order_items contract`](contracts/source/operational_order_items.v1.yaml) | Incremental PostgreSQL boundary (Phase 2A) | Accepted |
-| [`Commerce Gold contract`](contracts/gold/mart_daily_commerce.v1.yaml) | Certified BRL commerce product (Phase 2A) | Accepted |
-| [`Olist order_payments contract`](contracts/source/olist_order_payments.v1.yaml) | Historical CSV boundary (Phase 2B) | Accepted |
-| [`Operational order_payments contract`](contracts/source/operational_order_payments.v1.yaml) | Incremental PostgreSQL boundary (Phase 2B) | Accepted |
-| [`Operational order_refunds contract`](contracts/source/operational_order_refunds.v1.yaml) | Synthetic refund events boundary (Phase 2B) | Accepted |
-| [`Refunds Gold contract`](contracts/gold/mart_daily_refunds.v1.yaml) | Certified synthetic refund product (Phase 2B) | Accepted |
-| [`Olist products contract`](contracts/source/olist_products.v1.yaml) | Historical CSV boundary (Phase 2C) | Accepted |
-| [`Operational products contract`](contracts/source/operational_products.v1.yaml) | Incremental PostgreSQL boundary (Phase 2C) | Accepted |
-| [`Olist sellers contract`](contracts/source/olist_sellers.v1.yaml) | Historical CSV boundary (Phase 2C) | Accepted |
-| [`Operational sellers contract`](contracts/source/operational_sellers.v1.yaml) | Incremental PostgreSQL boundary (Phase 2C) | Accepted |
-| [`Category commerce Gold contract`](contracts/gold/mart_daily_category_commerce.v1.yaml) | Certified BRL category breakdown (Phase 2C) | Accepted |
-| [`Phase 2C slice 1 closure evidence`](docs/evidence/phase2c-closure.md) | Products/sellers + category commerce results | Closed |
-| [`Olist customers contract`](contracts/source/olist_customers.v1.yaml) | Historical CSV boundary (Phase 2C slice 2) | Accepted |
-| [`Operational customers contract`](contracts/source/operational_customers.v1.yaml) | Incremental PostgreSQL boundary (Phase 2C slice 2) | Accepted |
-| [`Phase 2C slice 2 closure evidence`](docs/evidence/phase2c-slice2-closure.md) | Customers dimension ingestion results | Closed |
-| [`FX usd_brl rate contract`](contracts/source/fx_rate_usd_brl.v1.yaml) | External BCB PTAX reference boundary (Phase 2D) | Accepted |
-| [`FX usd_clp rate contract`](contracts/source/fx_rate_usd_clp.v1.yaml) | External SII Dolar Observado reference boundary (Phase 2D) | Accepted |
-| [`Phase 2D closure evidence`](docs/evidence/phase2d-closure.md) | gmv_clp implementation + fail-closed verification | Closed |
-| [`Airflow orchestration closure evidence`](docs/evidence/airflow-orchestration-closure.md) | ecom_pipeline DAG end-to-end verification | Closed |
-
-## Deliberate scope
-
-Phase 1 contains one complete orders vertical slice. Phase 2A adds `order_items` + BRL
-GMV/AOV. Phase 2B adds `order_payments` + synthetic refunds. Phase 2C adds
-`products`/`sellers`/`customers` dimensions + category commerce breakdown. Airflow
-orchestration (ADR-009) wraps these existing stages in one manually-triggerable DAG. All
-of the following remain deliberately excluded:
-
-- any new-vs-returning-customer metric (`customers` is ingested and the `customer_id`
-  vs `customer_unique_id` distinction is exposed, but no metric is defined on it — that
-  requires its own ADR, SDD §37);
-- any seller-grained Gold metric (`sellers` is ingested but not yet consumed by one);
-- a true net-of-refund GMV/revenue figure (ADR-005: `mart_daily_commerce.gmv_brl` is
-  never netted against `mart_daily_refunds`; a reader computes any net view explicitly);
-- CLP beyond `mart_daily_commerce.gmv_clp` (Phase 2D, ADR-007; freight/gross/AOV in CLP
-  and CLP on the category/refunds marts are additive follow-ups, not yet implemented);
-- dashboarding;
-- cloud infrastructure;
-- CDC and streaming;
-- Spark and distributed processing;
-- agent or MCP access.
-
-These technologies and entities are introduced only when a later requirement justifies them.
-
-## Phase 0 completion
-
-Phase 0 was accepted by Juan Pablo on 2026-09-06 after:
-
-- the four ADRs, contracts, metrics, and test matrix are reviewed;
-- the dataset manifest is validated;
-- the design package has no implementation-blocking contradictions;
-- Juan Pablo explicitly approved the package;
-- all Phase 0 artifacts were marked `Accepted` with the approval date;
-- the original SDD was archived;
-- the accepted V2 content was promoted to canonical `SDD.md`.
-
-## Phase 1 runbook
-
-Prerequisites: Docker Desktop running, `cp -n .env.example .env`, Python 3.12 + `uv`.
+Para el flujo completo se necesita Docker Desktop, Python 3.12, `uv` y un `.env` local:
 
 ```bash
+cp -n .env.example .env
 uv sync --frozen --extra dev
 docker compose up -d --wait source-postgres warehouse-postgres
-set -a; source .env; set +a
-uv run python -m ecom.bootstrap --csv dataset/olist_orders_dataset.csv --attempt-id boot-001
-scripts/create_source_reader.sh
-uv run python -m ecom.extract
-uv run python -m ecom.load
-uv run python -m ecom.mutate --ts 2018-10-21T00:00:00+00:00
-uv run python -m ecom.extract
-uv run python -m ecom.load
-cd dbt && PUBLICATION_ID=phase1 uv run --project .. python -m dbt.cli.main build --profiles-dir . && cd ..
-uv run python -m ecom.publish --publication-id phase1 --test-results dbt/target/run_results.json --dbt-manifest dbt/target/manifest.json
-uv run python -m ecom.retention
-ECOM_TEST_ENV=1 uv run python -m pytest tests/
-uv run --extra dev ruff check src tests
 ```
 
-Demonstrated behaviors: initial + incremental runs, idempotent rerun (`no_op`),
-crash-after-publish recovery reusing one committed batch, bootstrap structural failure,
-row quarantine below threshold, failed Gold publication preserving the certified view,
-and source = silver = gold reconciliation.
+El procedimiento detallado para la carga inicial, el lector, la extracción, dbt y la
+publicación está en la [guía operativa](docs/phase1-implementation-guide.md). La demo sintética es el
+recorrido recomendado para una primera revisión.
 
-The default bootstrap command validates the pinned CSV checksum in `data/manifest.json`.
-`--allow-unverified-input` is reserved for deterministic synthetic fixtures in tests.
-
-## Phase 2A runbook (order items + BRL commerce)
-
-Run after the Phase 1 runbook above, against the same running stack:
+Airflow es opcional y se activa separadamente:
 
 ```bash
-uv run python -m ecom.bootstrap_items --csv dataset/olist_order_items_dataset.csv --attempt-id boot-items-001
-uv run python -m ecom.extract_items
-uv run python -m ecom.load_items
-cd dbt && PUBLICATION_ID=phase2a uv run --project .. python -m dbt.cli.main build --profiles-dir . && cd ..
-uv run python -m ecom.publish --product mart_daily_commerce --publication-id phase2a --test-results dbt/target/run_results.json --dbt-manifest dbt/target/manifest.json
+docker compose --profile airflow up -d airflow
 ```
 
-`gold.mart_daily_commerce` is then queryable alongside `gold.mart_daily_order_fulfillment`.
-See [ADR-005](docs/adrs/ADR-005-commerce-metrics.md) for the GMV/AOV definitions and
-[ADR-006](docs/adrs/ADR-006-composite-entity-cursor.md) for the `order_items` cursor.
+Su DAG es manual y local: no se declara una frecuencia recurrente sin un requisito de
+actualización definido. La configuración está en [Airflow](dags/ecom_pipeline.py) y la
+decisión arquitectónica en [ADR-009](docs/adrs/ADR-009-airflow-orchestration.md).
 
-## Phase 2B runbook (order payments + synthetic refunds)
+## Verificaciones
 
-Run after the Phase 2A runbook above, against the same running stack:
+La integración continua ejecuta análisis estático, pruebas unitarias y un ciclo sintético completo con dos PostgreSQL
+efímeros. La verificación local de cierre V1 incluyó:
 
-```bash
-uv run python -m ecom.bootstrap_payments --csv dataset/olist_order_payments_dataset.csv --attempt-id boot-pay-001
-uv run python -m ecom.extract_payments
-uv run python -m ecom.load_payments
-uv run python -m ecom.generate_refunds --ts 2018-10-22T00:00:00+00:00
-uv run python -m ecom.extract_refunds
-uv run python -m ecom.load_refunds
-cd dbt && PUBLICATION_ID=phase2b uv run --project .. python -m dbt.cli.main build --profiles-dir . && cd ..
-uv run python -m ecom.publish --product mart_daily_refunds --publication-id phase2b --test-results dbt/target/run_results.json --dbt-manifest dbt/target/manifest.json
-```
+- 25 pruebas unitarias aprobadas.
+- 49 pruebas de integración aprobadas.
+- Reconciliación final aprobada.
+- dbt en las etapas base y final con `67/67` nodos exitosos.
+- Publicación de los cuatro productos Gold en ambas etapas.
+- Demo sintética completa con fixtures y sin red externa.
 
-`silver.int_payment_reconciliation` is a diagnostic-only model (never a GMV input).
-`ecom.generate_refunds` is entirely synthetic (ADR-005) — Olist has no refund signal; by
-default it refunds the lexicographically first unrefunded payment, or target one
-explicitly with `--order-id`/`--payment-sequential`. `gold.mart_daily_refunds` is grained
-by refund date and is never netted into `mart_daily_commerce.gmv_brl`.
+Estos resultados corresponden a fixtures sintéticos. El procesamiento del dataset Olist
+completo requiere sus archivos locales y se valida por separado; no se debe inferir su
+resultado a partir de la demo pequeña.
 
-## Phase 2C slice 1 runbook (products + sellers + category commerce)
+## Alcance deliberado
 
-Run after the Phase 2A runbook above, against the same running stack:
+Esta versión no incluye:
 
-```bash
-uv run python -m ecom.bootstrap_products --csv dataset/olist_products_dataset.csv --attempt-id boot-prod-001
-uv run python -m ecom.extract_products
-uv run python -m ecom.load_products
-uv run python -m ecom.bootstrap_sellers --csv dataset/olist_sellers_dataset.csv --attempt-id boot-sell-001
-uv run python -m ecom.extract_sellers
-uv run python -m ecom.load_sellers
-cd dbt && uv run --project .. python -m dbt.cli.main seed --profiles-dir .
-PUBLICATION_ID=phase2c uv run --project .. python -m dbt.cli.main build --profiles-dir . && cd ..
-uv run python -m ecom.publish --product mart_daily_category_commerce --publication-id phase2c --test-results dbt/target/run_results.json --dbt-manifest dbt/target/manifest.json
-```
+- Dashboard o API pública.
+- CDC, streaming o captura de hard deletes.
+- Infraestructura en la nube o alta disponibilidad.
+- Métricas de clientes nuevos/recurrentes.
+- Métricas Gold por vendedor.
+- GMV neto de devoluciones.
+- CLP para columnas y productos todavía no certificados.
 
-`dbt seed` loads the static `product_category_name_translation` reference table (ADR-008
-— not ingested through bootstrap/extract/load, since it has no natural key mutation).
-`gold.mart_daily_category_commerce` breaks BRL commerce value down by product category at
-item grain, reapplying ADR-005's eligibility rules; `sum(category_gmv_brl)` by date
-reconciles exactly to `mart_daily_commerce.gmv_brl`. Any seller-grained Gold metric
-remains out of scope (ADR-008 "Deferred").
+Estas omisiones son decisiones de alcance, no componentes incompletos ocultos. El estado
+actual, invariantes y próximas etapas están registrados en
+[`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md).
 
-## Phase 2C slice 2 runbook (customers dimension)
+## Documentación
 
-Run after (or alongside) the Phase 1 runbook above, against the same running stack —
-`customers` is tightly coupled 1:1 with `orders`, so it should be bootstrapped right after
-it:
+- [Estado actual](docs/CURRENT_STATE.md): alcance, evidencia y pendientes.
+- [Glosario de métricas](docs/metrics.md): grano y definiciones de negocio.
+- [SDD](SDD.md): diseño técnico aceptado.
+- [ADR-002](docs/adrs/ADR-002-incremental-commit-protocol.md): cursor, lote, punto de control y recuperación.
+- [ADR-003](docs/adrs/ADR-003-contract-quality-quarantine.md): contratos y cuarentena.
+- [ADR-004](docs/adrs/ADR-004-fulfillment-mart.md): Gold y promoción certificada.
+- [ADR-005](docs/adrs/ADR-005-commerce-metrics.md): GMV, AOV, flete y devoluciones.
+- [Pruebas](docs/testing/phase1-test-matrix.md): cobertura y casos de fallo.
+- [Evidencia histórica](docs/evidence/): cierres de fases anteriores.
 
-```bash
-uv run python -m ecom.bootstrap_customers --csv dataset/olist_customers_dataset.csv --attempt-id boot-cust-001
-uv run python -m ecom.extract_customers
-uv run python -m ecom.load_customers
-```
+## Licencia y fuentes
 
-`silver.stg_customers` exposes both `customer_id` (order-associated row) and
-`customer_unique_id` (repeat-customer identity, SDD §9.4). No metric is defined on
-`customer_unique_id` in this slice; that is deferred pending its own ADR.
-
-## Phase 2D runbook (BRL->CLP FX, gmv_clp)
-
-Run after the Phase 2A runbook above, against the same running stack:
-
-```bash
-uv run python -m ecom.fetch_fx_rates --from-date 2016-01-01 --to-date 2018-12-31
-# or, without live network access:
-uv run python -m ecom.fetch_fx_rates --from-date 2017-01-01 --to-date 2018-02-01 --fixture-dir tests/fixtures/fx
-cd dbt && uv run --project .. python -m dbt.cli.main seed --profiles-dir .
-PUBLICATION_ID=phase2d uv run --project .. python -m dbt.cli.main build --profiles-dir . && cd ..
-uv run python -m ecom.publish --product mart_daily_commerce --publication-id phase2d --test-results dbt/target/run_results.json --dbt-manifest dbt/target/manifest.json
-```
-
-`ecom.fetch_fx_rates` pulls BCB PTAX (BRL leg) and SII Dolar Observado (CLP leg) for the
-requested range and upserts them into `raw_stage.fx_rate_usd_brl`/`fx_rate_usd_clp` (no
-network call with `--fixture-dir`). `silver.int_fx_cross_rate` resolves a BRL/CLP
-cross-rate per `mart_daily_commerce` cohort date, carrying forward up to 7 calendar days
-per leg; a date that cannot resolve on either leg fails the dbt build closed
-(`assert_fx_rate_resolves_for_commerce_dates`), per ADR-007.
-
-## Airflow runbook (ecom_pipeline)
-
-Run after bootstrapping at least `orders` and creating the source reader (Phase 1
-runbook above):
-
-```bash
-docker compose up -d --wait source-postgres warehouse-postgres
-docker compose build airflow
-docker compose up -d airflow
-# wait for the scheduler, then:
-docker compose exec airflow airflow dags unpause ecom_pipeline
-docker compose exec airflow airflow dags trigger ecom_pipeline
-docker compose exec airflow airflow tasks states-for-dag-run ecom_pipeline <run_id>
-```
-
-`ecom_pipeline` orchestrates `extract_<entity> -> load_<entity>` for every entity
-(parallel across entities), `fetch_fx_rates`, one shared `dbt seed`/`dbt build`, and four
-independent `publish_*` tasks — every task is a thin wrapper around the exact CLI
-commands in the runbooks above (ADR-009). It does **not** orchestrate bootstrap, the
-source-reader setup script, or `ecom.mutate`/`ecom.generate_refunds` (run those
-separately, as today). `fetch_fx_rates`'s default window is the last 14 days relative to
-the DAG's logical date; against the historical demo fixtures, fetch that range directly
-first (see `docs/evidence/airflow-orchestration-closure.md`).
-
-Candidate retention runs as its own DAG, `ecom_retention` (one task, `schedule=None`),
-kept separate per ADR-009 so it never widens `ecom_pipeline`'s scope:
-
-```bash
-docker compose exec airflow airflow dags unpause ecom_retention
-docker compose exec airflow airflow dags trigger ecom_retention
-```
-
-## Continuous integration
-
-Every pull request and push to `main` runs
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml): Ruff lint and format checks, unit
-tests, then a full pipeline cycle (bootstrap orders+customers, extract+load orders,
-extract+load customers, fetch FX rates, dbt seed, dbt build, publish all four Gold
-products, integration tests — including the
-`order_items`/`order_payments`/`order_refunds`/`products`/`sellers`/`customers`/FX
-vertical slices — and final reconciliation) against two ephemeral PostgreSQL containers
-using the repository's `compose.yaml`. `customers` bootstraps alongside `orders` as an
-explicit CI step (not inside pytest) because it is tightly coupled 1:1 with orders; see
-`docs/CURRENT_STATE.md` §6a for why. `ecom.fetch_fx_rates` always runs with
-`--fixture-dir tests/fixtures/fx` in CI — the live BCB/SII sources are never called by
-any automated test. CI bootstraps from small synthetic fixtures
-(`tests/fixtures/orders_small.csv`, `tests/fixtures/order_items_small.csv`,
-`tests/fixtures/order_payments_small.csv`, `tests/fixtures/products_small.csv`,
-`tests/fixtures/sellers_small.csv`, `tests/fixtures/customers_small.csv`,
-`tests/fixtures/fx/usd_brl.csv`, `tests/fixtures/fx/usd_clp.csv`), never the full Olist
-CSVs or the live FX endpoints.
-
-## Next steps
-
-See [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md) for the authoritative next slice and
-its entry conditions.
+El código se distribuye bajo [MIT](LICENSE). El dataset Olist conserva sus propios
+términos y no se incluye en este repositorio. Las credenciales y configuraciones locales
+se mantienen fuera de Git.
