@@ -101,11 +101,11 @@ jobs:
 
       - name: dbt seed (static reference data)
         working-directory: dbt
-         run: uv run --project .. python -m dbt.cli.main seed --profiles-dir .
+        run: uv run --project .. python -m dbt.cli.main seed --profiles-dir .
 
       - name: dbt build (baseline candidate)
         working-directory: dbt
-         run: PUBLICATION_ID=ci_baseline uv run --project .. python -m dbt.cli.main build --profiles-dir .
+        run: PUBLICATION_ID=ci_baseline uv run --project .. python -m dbt.cli.main build --profiles-dir .
 
       - name: Publish baseline Gold candidates
         run: |
@@ -140,7 +140,7 @@ jobs:
 
       - name: dbt build (final candidate)
         working-directory: dbt
-         run: PUBLICATION_ID=ci_final uv run --project .. python -m dbt.cli.main build --profiles-dir .
+        run: PUBLICATION_ID=ci_final uv run --project .. python -m dbt.cli.main build --profiles-dir .
 
       - name: Publish final Gold candidates
         run: |
