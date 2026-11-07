@@ -7,6 +7,7 @@
 **Accepted date:** 2026-10-06
 **Decision scope:** Local orchestration of the already-independent extract/load/dbt/publish
 commands across all entities
+**Implementation evidence:** `docs/evidence/airflow-orchestration-closure.md`
 **Related SDD:** `SDD.md` §30 (Orchestration), §33 Roadmap ("Airflow after tasks work
 independently")
 **Related ADRs:** ADR-001 (topology, unchanged), ADR-002/006/008 (per-entity ingestion,
@@ -20,9 +21,10 @@ has multiple stable dependent stages, one Airflow DAG may orchestrate."* That co
 now met: eight entities (`orders`, `order_items`, `order_payments`, `order_refunds`,
 `products`, `sellers`, `customers`, FX rates) each have independently executable,
 individually tested `extract_*`/`load_*`/`fetch_fx_rates` commands, a shared dbt project,
-and four `publish` targets. Today an operator runs ~20 commands by hand per the README
-runbooks. `AGENTS.md` §3 requires an explicit design reason before introducing a new
-orchestrator; this ADR is that reason, scoped narrowly to orchestration only.
+and four `publish` targets. Today an operator runs roughly 20 commands by hand per the
+README runbooks. The existing pipeline therefore has a concrete need for a dependency
+graph, retries, and one-command execution. This ADR is scoped narrowly to orchestration
+only.
 
 ## Decision
 
@@ -43,8 +45,7 @@ manifest.json produced by the single dbt build)
 
 `dbt build` depends on **every** `load_*` task and `fetch_fx_rates` succeeding
 (`trigger_rule=all_success`): a failed extract/load for any one entity blocks the shared
-build rather than letting Gold candidates build from partially stale data, consistent with
-this project's fail-closed posture (`AGENTS.md` §6.8/6.9). Each `publish_*` task is
+build rather than letting Gold candidates build from partially stale data. Each `publish_*` task is
 independent of the others (one product's publish failure does not block another's),
 mirroring how `publish.py` already treats products independently.
 
@@ -99,7 +100,7 @@ enabled now.
 ### A managed/cloud orchestrator (MWAA, Cloud Composer, Astronomer)
 
 Rejected: violates the zero-paid-infrastructure constraint and introduces cloud
-credentials with no business requirement yet (`AGENTS.md` §18).
+credentials without a business requirement.
 
 ### Orchestrate inside a single Python script (no orchestrator)
 
@@ -109,25 +110,22 @@ capability this ADR is meant to add evidence for.
 
 ### Prefect or Dagster instead of Airflow
 
-Rejected: Airflow is the orchestrator `SDD.md` §30 and `ARCHITECTURE_BIBLE.md` already
-named as the default expectation for this kind of batch DAG; introducing a second,
-undiscussed orchestrator choice here would be exactly the "AI invents architecture because
-it's easier" pattern `AGENTS.md` §20 prohibits.
+Rejected: Airflow is the orchestrator named by `SDD.md` §30 and
+`ARCHITECTURE_BIBLE.md` for this kind of batch DAG; introducing a second orchestrator
+would add an unnecessary architectural choice.
 
 ### LocalExecutor with a dedicated Airflow metadata Postgres
 
 Rejected for now: adds a third Postgres service for no demonstrated need at this scale
-(two entities' worth of sequential tasks run in well under a second each); `AGENTS.md`
-§18 asks not to add infrastructure ahead of a representative-scale justification.
+(two entities' worth of sequential tasks run in well under a second each).
 `SequentialExecutor` is explicitly documented by Airflow as intended for this kind of
 local/testing use.
 
 ### Have Airflow tasks call Python functions directly (PythonOperator) instead of shelling out
 
 Rejected: every existing command is a CLI entry point designed to be independently
-runnable and tested outside Airflow (`AGENTS.md` §1 "each pipeline stage must first exist
-as an independently executable command"); shelling out via `BashOperator` preserves that
-property exactly, rather than coupling task logic to Airflow's import path.
+runnable and tested outside Airflow; shelling out via `BashOperator` preserves that
+property rather than coupling task logic to Airflow's import path.
 
 ## Consequences
 
@@ -149,42 +147,6 @@ Costs and limitations:
   individual commands directly, as today) — it is a manually-verified, documented local
   capability, not a new automated test surface. Adding Airflow to CI is a separate,
   explicitly out-of-scope future decision given the added CI runtime/complexity cost.
-
-## Implementation notes (2026-10-06)
-
-- A real pre-existing gap was found while verifying this ADR, not introduced by it:
-  `dbt/profiles.yml` hardcoded `host: localhost` and never read `WAREHOUSE_DSN` at all —
-  it reads discrete `WAREHOUSE_USER`/`WAREHOUSE_PASSWORD`/`WAREHOUSE_DB`/`WAREHOUSE_PORT`
-  env vars. This worked by accident for every host-side and CI invocation so far because
-  `localhost` always resolved correctly there (CI runs dbt on the same runner as the
-  Postgres containers' published ports). It silently could not have worked from any
-  container other than the warehouse's own. Fixed by changing the hardcoded host to
-  `"{{ env_var('WAREHOUSE_HOST', 'localhost') }}"` — defaults to the exact previous
-  behavior for every existing caller, and the `airflow` Compose service sets
-  `WAREHOUSE_HOST=warehouse-postgres`, `WAREHOUSE_PORT=5432` (the container-network
-  values) alongside `WAREHOUSE_DSN` (which only the Python commands consume).
-- Verified by actually triggering the DAG via the Airflow CLI (`airflow dags trigger`)
-  against a fresh Docker Compose stack with the orders/items/payments/products/sellers/
-  customers fixtures bootstrapped and the source-reader role created — not just by
-  inspecting the DAG's static structure. The first full run surfaced the `profiles.yml`
-  gap above; after fixing it, all 20 tasks (7 extract + 7 load + `fetch_fx_rates` +
-  `dbt_seed` + `dbt_build` + 4 `publish_*`) completed successfully and all four Gold
-  products were queryable with the `airflow_<ts_nodash>` publication ID.
-- The `dbt_build` task failed once for an expected, correct reason unrelated to
-  orchestration: `fetch_fx_rates`'s default rolling window (`ds-14` to `ds`) does not
-  cover the demo fixtures' historical 2017/2018 purchase dates, so
-  `assert_fx_rate_resolves_for_commerce_dates` correctly failed the build closed
-  (ADR-007). This is the expected interaction for a production-shaped recent-rates
-  window against intentionally historical demo data; verifying this DAG with the
-  provided fixtures requires fetching rates for the fixtures' actual date range
-  (`tests/fixtures/fx`'s 2017-01-01..2018-02-01), not the DAG's default production
-  window. Full evidence: `docs/evidence/airflow-orchestration-closure.md`.
-- The Airflow webserver's gunicorn worker repeatedly reimported heavyweight optional
-  provider packages (e.g. `apache-airflow-providers-google`'s Azure Synapse models) on
-  worker (re)start, producing noisy but harmless `SyntaxWarning` log spam. This did not
-  block the scheduler or any task execution; DAG verification used the Airflow CLI
-  (`airflow dags trigger`/`tasks states-for-dag-run`) directly rather than depending on
-  the webserver UI being responsive.
 
 ## Reversal and migration path
 

@@ -8,23 +8,7 @@ PostgreSQL; conserva evidencia original en Parquet; valida contratos y filas inv
 modela métricas con dbt; y publica vistas Gold certificadas para análisis de
 cumplimiento, comercio y categorías.
 
-No intenta ser un sistema transaccional, una plataforma de alertas ni una demostración
-de infraestructura distribuida. Su objetivo es demostrar cómo construir una frontera
-reproducible entre una fuente operacional y datos analíticos versionados.
-
-## Problema
-
-Un sistema operacional de pedidos no debería ser al mismo tiempo el almacén de
-analítica. Este proyecto separa ambas responsabilidades y permite responder preguntas
-como:
-
-- ¿Cuántos pedidos se compraron y entregaron por fecha?
-- ¿Qué proporción de pedidos válidos llegó tarde?
-- ¿Cuál es el GMV y el flete por cohorte de compra?
-- ¿Cómo se distribuye el comercio por categoría de producto?
-- ¿Qué observaciones de pagos o devoluciones requieren revisión?
-
-El producto principal es una familia de productos Gold, no solo una tabla final:
+## Productos analíticos
 
 | Producto | Grano | Uso principal |
 |---|---|---|
@@ -33,7 +17,8 @@ El producto principal es una familia de productos Gold, no solo una tabla final:
 | `mart_daily_category_commerce` | Fecha y categoría | Desglose del GMV por producto |
 | `mart_daily_refunds` | Una fila por fecha de devolución | Eventos sintéticos de devolución |
 
-`gmv_brl` no es ingreso contable: excluye flete, pedidos cancelados/no disponibles y devoluciones.
+`gmv_brl` se calcula sobre ítems de pedidos elegibles, sin flete y sin descontar devoluciones;
+no representa ingreso contable.
 Las devoluciones son sintéticas porque Olist no contiene eventos observados de devolución.
 `gmv_clp` es una conversión aditiva y actualmente es la única métrica CLP certificada.
 Las definiciones completas están en el [glosario de métricas](docs/metrics.md).
@@ -57,7 +42,7 @@ Cada entidad usa una ventana incremental acotada por cursor. La extracción fija
 límite superior dentro de un snapshot estable y registra un lote comprometido antes
 de avanzar el punto de control.
 
-El flujo conserva tres estados que cumplen funciones distintas:
+## Capas de datos
 
 - **Bronze:** evidencia de lo recibido, con manifest y hashes.
 - **Silver:** versiones normalizadas y selección del estado actual por clave.
@@ -67,7 +52,7 @@ Una publicación Gold se construye primero como candidato. Solo una ejecución d
 exitosa y validada puede reemplazar la vista estable. Un fallo de transformación no
 debe reemplazar la última publicación certificada.
 
-## Demo de portafolio
+## Ejecución rápida
 
 La ruta más corta usa fixtures sintéticos, no requiere descargar Olist, no consulta
 proveedores FX y no inicia Airflow:
@@ -89,11 +74,10 @@ La demo:
 - Publica los cuatro productos Gold.
 
 El script utiliza `var/demo-data/`, ignorado por Git, y no elimina volúmenes Docker.
-Para una demostración reproducible desde cero, usa un proyecto Compose nuevo o reinicia
-los volúmenes de forma explícita. El `publication_id` se imprime al finalizar.
+Para empezar desde cero, usa un proyecto Compose nuevo o reinicia los volúmenes de forma
+explícita. El `publication_id` se imprime al finalizar.
 
-La demo separa el procesamiento del consumo: los productos quedan consultables como
-vistas `gold.*` en el almacén. No hay un panel residente en esta versión.
+Los resultados quedan disponibles en las vistas `gold.*` del almacén.
 
 ## Arquitectura de datos
 
@@ -121,20 +105,15 @@ vistas `gold.*` en el almacén. No hay un panel residente en esta versión.
 - Vistas Gold estables independientes de las tablas candidatas.
 - Retención segura de candidatos antiguos y fallidos.
 
-## Decisiones técnicas
+## Stack
 
-- **PostgreSQL operacional y almacén:** separa extracción de consultas analíticas y
-  permite demostrar cargas, puntos de control y restricciones relacionales sin servicios pagos.
-- **Python y Parquet:** el volumen de la demo no justifica un framework distribuido; los
-  archivos comprometidos permiten conservar evidencia y reanudar después de una caída.
-- **dbt:** concentra transformaciones, documentación, pruebas y contratos de los productos
-  de consumo.
-- **Candidato Gold → vista certificada:** evita que una corrida fallida exponga resultados
-  parciales o mezcle generaciones de datos.
-- **Airflow opcional:** agenda los mismos comandos existentes, pero no contiene la lógica
-  de negocio. El flujo manual sigue funcionando sin un planificador residente.
-- **Sin Spark, Kafka ni nube:** no se agregan componentes distribuidos sin una necesidad
-  de volumen, latencia o disponibilidad que lo justifique.
+| Componente | Responsabilidad |
+|---|---|
+| PostgreSQL | Fuente operacional y almacén analítico local |
+| Python | Bootstrap, extracción, carga y comandos operativos |
+| Parquet | Evidencia Bronze y cuarentena |
+| dbt | Modelos Silver, intermedios, Gold y pruebas |
+| Airflow | Orquestación opcional de los comandos existentes |
 
 ## Empezar
 
@@ -150,8 +129,7 @@ docker compose up -d --wait source-postgres warehouse-postgres
 ```
 
 El procedimiento detallado para la carga inicial, el lector, la extracción, dbt y la
-publicación está en la [guía operativa](docs/phase1-implementation-guide.md). La demo sintética es el
-recorrido recomendado para una primera revisión.
+publicación está en la [guía operativa](docs/phase1-implementation-guide.md).
 
 Airflow es opcional y se activa separadamente:
 
@@ -159,14 +137,14 @@ Airflow es opcional y se activa separadamente:
 docker compose --profile airflow up -d airflow
 ```
 
-Su DAG es manual y local: no se declara una frecuencia recurrente sin un requisito de
-actualización definido. La configuración está en [Airflow](dags/ecom_pipeline.py) y la
+El DAG `ecom_pipeline` se ejecuta manualmente. Su configuración está en
+[Airflow](dags/ecom_pipeline.py) y la
 decisión arquitectónica en [ADR-009](docs/adrs/ADR-009-airflow-orchestration.md).
 
 ## Verificaciones
 
-La integración continua ejecuta análisis estático, pruebas unitarias y un ciclo sintético completo con dos PostgreSQL
-efímeros. La verificación local de cierre V1 incluyó:
+La integración continua ejecuta análisis estático, pruebas unitarias y un ciclo sintético
+completo con dos PostgreSQL efímeros. La verificación local de cierre V1 incluyó:
 
 - 25 pruebas unitarias aprobadas.
 - 49 pruebas de integración aprobadas.
@@ -175,13 +153,12 @@ efímeros. La verificación local de cierre V1 incluyó:
 - Publicación de los cuatro productos Gold en ambas etapas.
 - Demo sintética completa con fixtures y sin red externa.
 
-Estos resultados corresponden a fixtures sintéticos. El procesamiento del dataset Olist
-completo requiere sus archivos locales y se valida por separado; no se debe inferir su
-resultado a partir de la demo pequeña.
+Resultados obtenidos con fixtures sintéticos; no corresponden a una ejecución completa del
+dataset Olist.
 
-## Alcance deliberado
+## Limitaciones
 
-Esta versión no incluye:
+La versión actual no incluye:
 
 - Dashboard o API pública.
 - CDC, streaming o captura de hard deletes.
@@ -191,8 +168,7 @@ Esta versión no incluye:
 - GMV neto de devoluciones.
 - CLP para columnas y productos todavía no certificados.
 
-Estas omisiones son decisiones de alcance, no componentes incompletos ocultos. El estado
-actual, invariantes y próximas etapas están registrados en
+El estado actual, invariantes y próximas etapas están registrados en
 [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md).
 
 ## Documentación

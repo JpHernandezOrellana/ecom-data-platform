@@ -59,8 +59,8 @@ semantics.
 If no rate is published for that exact calendar date on either leg (weekends, Chilean or
 Brazilian holidays), the policy is: **carry forward the most recent prior published rate,
 up to a maximum of 7 calendar days back.** If either leg has no rate within 7 days, the
-row is **not silently defaulted** — it fails the FX-dependent model closed, consistent with
-`AGENTS.md` §6.8 (no silent loss) and must be surfaced as a quarantined/flagged row, not a
+row is **not silently defaulted** — it fails the FX-dependent model closed and must be
+surfaced as a quarantined/flagged row, not a
 zero or null CLP value slipped into an otherwise-complete mart.
 
 ### Rounding
@@ -69,7 +69,7 @@ Converted CLP amounts are rounded to the nearest integer using **half-up** round
 (standard commercial rounding; Chilean peso has no subunit in practice). BRL source amounts
 remain `NUMERIC(18,2)` through the conversion; only the final CLP output column is rounded
 to an integer. Intermediate cross-rate arithmetic uses fixed-precision decimal, never
-float, per `AGENTS.md` §6.5.
+float.
 
 ### Column contract (for the future CLP phase)
 
@@ -105,7 +105,7 @@ analytical reporting.
 
 Rejected: unbounded carry-forward could silently use a stale, materially wrong rate
 indefinitely during a data gap. The 7-day cap forces an explicit failure instead of silent
-staleness, per `AGENTS.md` §6.8/§6.9.
+staleness.
 
 ### Round at the BRL stage instead of only the final CLP output
 
@@ -138,37 +138,6 @@ Costs and limitations:
 - SII's published page format is HTML tables keyed by month, not a clean API; the future
   ingestion job must parse it defensively and treat unparseable pages as quarantined
   source data, not a crash.
-
-## Implementation notes (2026-10-06)
-
-- `ecom.fetch_fx_rates` fetches both legs for a bounded `--from-date`/`--to-date` range
-  into `raw_stage.fx_rate_usd_brl`/`fx_rate_usd_clp` (direct warehouse tables, not
-  simulator-owned `source.*` — these are external reference data with no operational
-  cursor, just an idempotent upsert by `rate_date`).
-- HTTP calls shell out to `curl` rather than Python's `urllib`, to avoid depending on a
-  correctly configured local CA bundle (a real portability issue encountered during
-  implementation) and to avoid adding a `requests`/`certifi` dependency for two simple GET
-  calls (`AGENTS.md` §13).
-- SII's per-year page actually contains one clean consolidated table
-  (`id="table_export"`, one row per day, one column per month, Chilean comma-decimal),
-  not the twelve per-month tables the page also renders — confirmed by inspecting the live
-  page before writing the parser, not assumed from the ADR's prose.
-- `--fixture-dir` makes the command read deterministic CSV fixtures instead of calling the
-  live sources; CI and all automated tests use this path exclusively (no test depends on
-  BCB/SII availability).
-- The 7-day carry-forward and fail-closed behavior (`int_fx_cross_rate`,
-  `assert_fx_rate_resolves_for_commerce_dates`) was verified by a manual reproduction, not
-  an automated pytest test: no existing test in this repository invokes `dbt` from
-  pytest, and introducing that pattern for one scenario was judged worse than a documented
-  manual repro (see `docs/evidence/phase2d-closure.md`).
-- Scope for this slice is `mart_daily_commerce.gmv_clp` only, plus its four provenance
-  columns. `freight_value_clp`, `gross_order_value_clp`, `aov_clp`, and CLP on
-  `mart_daily_category_commerce`/`mart_daily_refunds` are deferred additive follow-ups
-  using the identical pattern — not a design gap, a scope decision to ship one complete
-  vertical slice of the mechanism before widening it (`AGENTS.md` §5).
-- CLP columns are independently rounded per column; this repository does not assert that
-  BRL-side arithmetic identities (e.g. `gross = gmv + freight`) also hold exactly for their
-  CLP counterparts, since none of those additional CLP columns exist yet.
 
 ## Reversal and migration path
 

@@ -24,8 +24,7 @@ Without an explicit rule, a future implementer could serialize the composite key
 ad hoc (e.g. simple string concatenation), risking incorrect lexicographic ordering or
 collisions (e.g. `order_item_id` 1 vs 10 vs 2 sorting wrong, or a separator appearing
 inside an ID). ADR-002 is explicitly scoped to Phase 1/`orders`; extending its protocol to
-a new entity shape requires its own decision record per `AGENTS.md` §23 (changes to
-checkpoint/cursor semantics require an ADR).
+a new entity shape requires a separate decision record because it changes cursor semantics.
 
 ## Decision
 
@@ -100,9 +99,8 @@ each new composite-key entity must follow.
 
 ### Per-entity bespoke cursor logic with no documented pattern
 
-Rejected: `AGENTS.md` §4 requires deterministic, tested cursor boundary behavior; an
-undocumented, one-off encoding per entity would be unauditable and untestable as a
-general pattern.
+Rejected: deterministic, tested cursor boundary behavior requires an explicit, auditable
+encoding pattern rather than undocumented one-off logic per entity.
 
 ## Consequences
 

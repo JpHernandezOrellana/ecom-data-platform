@@ -20,7 +20,8 @@ slice narrowly: `products` and `sellers` as ingested dimensions, and one new cer
 Gold mart breaking commerce value down by product category. `customers` and any
 new-vs-returning-customer semantics are explicitly deferred (see "Deferred" below) because
 `SDD.md` §37 already marks customer-history strategy as a decision not yet accepted, and
-inventing it here would violate `AGENTS.md` §20.
+introducing it here would mix an unresolved business definition into an unrelated
+dimension-ingestion change.
 
 `olist_products_dataset.csv` (32,951 rows) and `olist_sellers_dataset.csv` (3,095 rows)
 have no business timestamp and no status domain — unlike `orders`, they are plain
@@ -54,8 +55,7 @@ characteristic (610 rows) and is carried through, never quarantined for that rea
 `product_category_name_translation.csv` (71 rows) is static reference data with no
 natural incremental semantics (no key mutates, no cursor applies). Running it through the
 full bootstrap/extract/load/checkpoint machinery would add ingestion ceremony with no
-corresponding invariant to protect (`AGENTS.md` §5: "Do not scaffold five unused
-technologies in advance" applies equally to over-scaffolding one). It is loaded as a dbt
+corresponding invariant to protect. It is loaded as a dbt
 seed (`dbt/seeds/product_category_name_translation.csv`) and joined in Silver.
 
 ### New Gold mart: `mart_daily_category_commerce`
@@ -125,7 +125,7 @@ Positive:
   schema changes;
 - `mart_daily_category_commerce` is independently reconcilable against the already
   certified `mart_daily_commerce`;
-- no new architecture, orchestrator, or storage engine introduced (`AGENTS.md` §3).
+- no new architecture, orchestrator, or storage engine is required.
 
 Costs and limitations:
 
